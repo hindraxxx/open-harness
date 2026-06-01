@@ -297,6 +297,12 @@ Allowed:
 - test edits required by validation plan
 - implementation checklist updates
 
+Required:
+
+- After completing each implementation task, check its item in `## Implementation Checklist`.
+- Before reporting implementation complete, run `harness status <session-id>`.
+- Do not summarize implementation as complete while any implementation checklist item remains unchecked.
+
 Forbidden:
 
 - expanding scope without returning to planning
@@ -407,7 +413,21 @@ def non_harness_changes() -> list[str]:
             check=False,
         )
     except OSError:
-        return []
+        result = None
+    if result is None or result.returncode != 0:
+        changes = []
+        ignored_dirs = {".git", ".harness", "__pycache__"}
+        ignored_files = {"AGENTS.md", ".env.example", ".gitignore"}
+        for path in root().rglob("*"):
+            if not path.is_file():
+                continue
+            rel = path.relative_to(root()).as_posix()
+            if rel in ignored_files:
+                continue
+            if any(part in ignored_dirs for part in path.relative_to(root()).parts):
+                continue
+            changes.append(rel)
+        return changes
     changes = []
     for line in result.stdout.splitlines():
         path = line[3:].strip()
@@ -522,15 +542,19 @@ def has_real_content(value: str) -> bool:
 
 
 def has_checked_item(value: str) -> bool:
-    return bool(re.search(r"^- \[[xX]\] .+", value, re.MULTILINE))
+    return bool(re.search(r"^-\s*\[[xX]\]\s+.+", value, re.MULTILINE))
 
 
 def has_unchecked_item(value: str) -> bool:
-    return bool(re.search(r"^- \[ \] .+", value, re.MULTILINE))
+    return bool(re.search(r"^-\s*\[ \]\s+.+", value, re.MULTILINE))
+
+
+def has_any_checklist_item(value: str) -> bool:
+    return bool(re.search(r"^-\s*\[[ xX]\]\s+.+", value, re.MULTILINE))
 
 
 def checked_markdown_links(value: str) -> list[str]:
-    return re.findall(r"^- \[[xX]\] \[[^\]]+\]\(([^)]+)\)", value, re.MULTILINE)
+    return re.findall(r"^-\s*\[[xX]\]\s+\[[^\]]+\]\(([^)]+)\)", value, re.MULTILINE)
 
 
 def proof_links_resolve(session_id: str, value: str) -> bool:
@@ -597,9 +621,18 @@ def validate_requirements(
         elif data.get("planning_approved_hash") != planning_snapshot(text):
             missing.append("Planning sections changed after approval; rerun `harness approve-planning <session-id> --by <name>`")
 
+    implementation_checklist = section(text, "Implementation Checklist")
+    if check_state == "implementation":
+        if not has_any_checklist_item(implementation_checklist):
+            missing.append("Implementation Checklist must contain actionable checklist items")
+        elif non_harness_changes() and has_unchecked_item(implementation_checklist):
+            missing.append("Implementation Checklist has unchecked items while product changes exist")
+
     if check_state in {"review", "quality-check", "done"}:
-        if not has_checked_item(section(text, "Implementation Checklist")):
+        if not has_checked_item(implementation_checklist):
             missing.append("Implementation Checklist needs at least one checked item")
+        if has_unchecked_item(implementation_checklist):
+            missing.append("Implementation Checklist must be fully checked before review")
 
     if check_state in {"quality-check", "done"}:
         review = section(text, "Review")

@@ -472,6 +472,8 @@ These instructions guide agent behavior. They do not replace CLI validation.
 - `harness preflight-edit req-login-timeout` blocks product code edits before planning has completed.
 - `harness transition req-login-timeout implementation` blocks until `harness approve-planning req-login-timeout --by <name>` has been run.
 - `harness preflight-edit req-login-timeout` blocks when approved planning sections changed after approval.
+- `harness status req-login-timeout` reports unchecked implementation checklist items when product files changed in implementation.
+- `harness transition req-login-timeout review` blocks until every implementation checklist item is checked.
 - `harness transition req-login-timeout quality-check` blocks until `harness approve-review req-login-timeout --by <name>` has been run.
 - `harness transition req-login-timeout planning` auto-syncs the Linear issue to `Planning` when Linear is configured.
 - `harness validate req-login-timeout` fails in `quality-check` until the validation plan is executed and proof/results are recorded.

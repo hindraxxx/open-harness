@@ -157,6 +157,8 @@ bin/harness transition req-login-timeout quality-check
 
 `review -> quality-check` requires explicit human review approval. Agents must not run `approve-review` unless the user explicitly approves the review.
 
+During `implementation`, every item in `## Implementation Checklist` must be checked before review. If product files changed while checklist items remain unchecked, `harness status` and `harness validate` report the missing checklist work.
+
 Inside `quality-check`, the agent must execute the artifact `## Validation Plan`, check off completed validation items, record commands/results under `## Quality Check > Commands Run`, and attach proof with `harness attach-proof`. `harness status` and `harness validate` report missing quality evidence until a checked proof link resolves to a file under the session `proof/` directory.
 
 Attach proof:

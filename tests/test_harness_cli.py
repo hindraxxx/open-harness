@@ -160,6 +160,49 @@ class HarnessCliTest(unittest.TestCase):
             self.assertNotEqual(blocked.returncode, 0)
             self.assertIn("Planning sections changed after approval", blocked.stdout)
 
+    def test_implementation_status_reports_unchecked_checklist_with_product_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            self.run_cli(cwd, "start", "req-login-timeout")
+            artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
+            text = artifact.read_text()
+            text = text.replace("TBD", "Download Neraca as Excel", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Acceptance exists", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Validation exists", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Implementation task", 1)
+            artifact.write_text(text)
+
+            self.run_cli(cwd, "transition", "req-login-timeout", "planning")
+            self.run_cli(cwd, "approve-planning", "req-login-timeout", "--by", "Liem")
+            self.run_cli(cwd, "transition", "req-login-timeout", "implementation")
+            (cwd / "app.py").write_text("changed\n")
+            result = self.run_cli(cwd, "validate", "req-login-timeout", check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Implementation Checklist has unchecked items while product changes exist", result.stdout)
+
+    def test_review_transition_requires_full_implementation_checklist(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            self.run_cli(cwd, "start", "req-login-timeout")
+            artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
+            text = artifact.read_text()
+            text = text.replace("TBD", "Download Neraca as Excel", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Acceptance exists", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Validation exists", 1)
+            text = text.replace("- [ ] TBD", "- [x] Done task\n- [ ] Undone task", 1)
+            artifact.write_text(text)
+
+            self.run_cli(cwd, "transition", "req-login-timeout", "planning")
+            self.run_cli(cwd, "approve-planning", "req-login-timeout", "--by", "Liem")
+            self.run_cli(cwd, "transition", "req-login-timeout", "implementation")
+            result = self.run_cli(cwd, "transition", "req-login-timeout", "review", check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Implementation Checklist must be fully checked before review", result.stdout)
+
     def test_review_to_quality_check_requires_approval(self):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)
