@@ -108,6 +108,39 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("transitioned: planning -> implementation", allowed.stdout)
             self.assertIn('planning_approved: "true"', artifact.read_text())
 
+    def test_review_to_quality_check_requires_approval(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            self.run_cli(cwd, "start", "req-login-timeout")
+            artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
+            text = artifact.read_text()
+            text = text.replace("TBD", "Download Neraca as Excel", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Acceptance exists", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Validation exists", 1)
+            text = text.replace("- [ ] TBD", "- [x] Implementation complete", 1)
+            artifact.write_text(text)
+
+            self.run_cli(cwd, "transition", "req-login-timeout", "planning")
+            self.run_cli(cwd, "approve-planning", "req-login-timeout", "--by", "Liem")
+            self.run_cli(cwd, "transition", "req-login-timeout", "implementation")
+            self.run_cli(cwd, "transition", "req-login-timeout", "review")
+
+            text = artifact.read_text()
+            text = text.replace("### AI Review\n\nTBD", "### AI Review\n\nNo blocking issues.")
+            text = text.replace("### Human Review\n\nTBD", "### Human Review\n\nLooks correct.")
+            artifact.write_text(text)
+
+            blocked = self.run_cli(cwd, "transition", "req-login-timeout", "quality-check", check=False)
+            self.assertNotEqual(blocked.returncode, 0)
+            self.assertIn("Human review must be approved", blocked.stdout)
+
+            self.run_cli(cwd, "approve-review", "req-login-timeout", "--by", "Liem")
+            allowed = self.run_cli(cwd, "transition", "req-login-timeout", "quality-check")
+
+            self.assertIn("transitioned: review -> quality-check", allowed.stdout)
+            self.assertIn('review_approved: "true"', artifact.read_text())
+
     def test_upgrade_guardrails_overwrites_bootstrap(self):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)

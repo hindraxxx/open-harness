@@ -128,6 +128,9 @@ linear_issue_url: "{{LINEAR_ISSUE_URL}}"
 planning_approved: "false"
 planning_approved_by: ""
 planning_approved_at: ""
+review_approved: "false"
+review_approved_by: ""
+review_approved_at: ""
 created_at: "{{CREATED_AT}}"
 updated_at: "{{UPDATED_AT}}"
 ---
@@ -309,6 +312,15 @@ Required fixes go through:
 ```bash
 harness transition <session-id> needs-fix
 ```
+
+Quality-check requires explicit human approval:
+
+```bash
+harness approve-review <session-id> --by <human-name>
+harness transition <session-id> quality-check
+```
+
+Agents must not run `approve-review` unless the user explicitly instructs them to approve review.
 """,
         "quality-check.md": """# Quality Check State Guardrails
 
@@ -421,6 +433,9 @@ def dump_frontmatter(data: dict[str, str], body: str) -> str:
         "planning_approved",
         "planning_approved_by",
         "planning_approved_at",
+        "review_approved",
+        "review_approved_by",
+        "review_approved_at",
         "created_at",
         "updated_at",
         "linear_sync",
@@ -519,6 +534,9 @@ def validate_requirements(session_id: str, target: str | None = None) -> list[st
             missing.append("AI Review must be recorded")
         if not has_real_content(subsection(review, "Human Review")):
             missing.append("Human Review must be recorded")
+        data, _ = parse_frontmatter(text)
+        if data.get("review_approved") != "true":
+            missing.append("Human review must be approved with `harness approve-review <session-id> --by <name>`")
 
     if check_state == "done":
         quality = section(text, "Quality Check")
@@ -865,6 +883,35 @@ def cmd_approve_planning(args: argparse.Namespace) -> None:
     print(f"planning approved by {args.by}")
 
 
+def cmd_approve_review(args: argparse.Namespace) -> None:
+    state = current_state(args.session_id)
+    if state != "review":
+        die(f"review approval requires session state 'review', current state is '{state}'")
+    missing = validate_requirements(args.session_id, "review")
+    if missing:
+        print("review approval blocked")
+        for item in missing:
+            print(f"- {item}")
+        raise SystemExit(1)
+    path = artifact_path(args.session_id)
+    text = read_text(path)
+    approval = f"Approved by {args.by} at {now()}."
+    review_text = section(text, "Review")
+    human_review = subsection(review_text, "Human Review")
+    if not has_real_content(human_review):
+        text = text.replace("### Human Review\n\nTBD", f"### Human Review\n\n{approval}")
+        path.write_text(text)
+    update_artifact_meta(
+        args.session_id,
+        {
+            "review_approved": "true",
+            "review_approved_by": args.by,
+            "review_approved_at": now(),
+        },
+    )
+    print(f"review approved by {args.by}")
+
+
 def cmd_transition(args: argparse.Namespace) -> None:
     if args.state not in STATES:
         die(f"unknown state: {args.state}")
@@ -980,6 +1027,11 @@ def build_parser() -> argparse.ArgumentParser:
     approve_p.add_argument("session_id")
     approve_p.add_argument("--by", required=True)
     approve_p.set_defaults(func=cmd_approve_planning)
+
+    approve_review_p = sub.add_parser("approve-review")
+    approve_review_p.add_argument("session_id")
+    approve_review_p.add_argument("--by", required=True)
+    approve_review_p.set_defaults(func=cmd_approve_review)
 
     transition_p = sub.add_parser("transition")
     transition_p.add_argument("session_id")

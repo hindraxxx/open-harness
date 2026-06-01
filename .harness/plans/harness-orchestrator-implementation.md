@@ -264,6 +264,16 @@ Required before:
 
 Agents must not run this command unless the user explicitly approves the plan.
 
+### `harness approve-review <session-id> --by <name>`
+
+Records explicit human review approval in artifact metadata and the `Human Review` section when needed.
+
+Required before:
+
+- `review -> quality-check`
+
+Agents must not run this command unless the user explicitly approves the review.
+
 ### `harness attach-proof <session-id> <file>`
 
 Copies or records proof under:
@@ -438,6 +448,7 @@ These instructions guide agent behavior. They do not replace CLI validation.
 - `harness status req-login-timeout` warns when non-harness files changed while the session is outside `implementation` or `needs-fix`.
 - `harness preflight-edit req-login-timeout` blocks product code edits before planning has completed.
 - `harness transition req-login-timeout implementation` blocks until `harness approve-planning req-login-timeout --by <name>` has been run.
+- `harness transition req-login-timeout quality-check` blocks until `harness approve-review req-login-timeout --by <name>` has been run.
 - `harness transition req-login-timeout planning` auto-syncs the Linear issue to `Planning` when Linear is configured.
 - Missing `.env` allows local-only operation.
 - Missing `LINEAR_API_KEY` blocks only Linear sync.

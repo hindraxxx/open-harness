@@ -145,6 +145,16 @@ bin/harness transition req-login-timeout implementation
 
 `planning -> implementation` requires explicit planning approval. Agents must not run `approve-planning` unless the user explicitly approves the plan.
 
+After implementation, move to review and stop for human review:
+
+```bash
+bin/harness transition req-login-timeout review
+bin/harness approve-review req-login-timeout --by "Liem"
+bin/harness transition req-login-timeout quality-check
+```
+
+`review -> quality-check` requires explicit human review approval. Agents must not run `approve-review` unless the user explicitly approves the review.
+
 Attach proof:
 
 ```bash
