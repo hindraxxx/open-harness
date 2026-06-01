@@ -241,7 +241,7 @@ In `quality-check`, validation must report missing work until:
 
 - all `## Validation Plan` checklist items are checked or explicitly moved to manual validation notes
 - `## Quality Check > Commands Run` records command/results
-- proof or manual validation notes exist
+- `## Quality Check > Proof` contains a checked Markdown link to an existing file under the session `proof/` directory
 
 ### `harness preflight-edit <session-id>`
 
@@ -468,6 +468,7 @@ These instructions guide agent behavior. They do not replace CLI validation.
 - `harness transition req-login-timeout quality-check` blocks until `harness approve-review req-login-timeout --by <name>` has been run.
 - `harness transition req-login-timeout planning` auto-syncs the Linear issue to `Planning` when Linear is configured.
 - `harness validate req-login-timeout` fails in `quality-check` until the validation plan is executed and proof/results are recorded.
+- `harness attach-proof req-login-timeout <file>` copies proof into the session `proof/` directory and records the checked link under `## Quality Check > Proof`.
 - Missing `.env` allows local-only operation.
 - Missing `LINEAR_API_KEY` blocks only Linear sync.
 - Invalid transitions fail with actionable missing checklist fields.

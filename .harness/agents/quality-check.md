@@ -8,7 +8,7 @@ On entry:
 2. Execute every unchecked validation checklist item that is automatable.
 3. Mark executed validation items checked in `## Validation Plan`.
 4. Record exact commands and results under `## Quality Check > Commands Run`.
-5. Attach proof with `harness attach-proof <session-id> <file>` or record manual validation notes.
+5. Attach proof with `harness attach-proof <session-id> <file>`.
 6. Run `harness validate <session-id>` before attempting `done`.
 
 Forbidden:
@@ -23,4 +23,4 @@ Failed validation goes through:
 harness transition <session-id> needs-fix
 ```
 
-Manual auth blockers require human proof notes.
+Manual auth blockers require human validation notes, but quality-check still needs at least one attached proof file under `proof/`.

@@ -478,6 +478,52 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("- [x] [result.txt](proof/result.txt)", artifact.read_text())
             self.assertTrue((artifact.parent / "proof" / "result.txt").exists())
 
+    def test_attach_proof_records_link_under_quality_check_proof(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            proof = cwd / "result.pdf"
+            proof.write_text("%PDF\n")
+            self.run_cli(cwd, "init")
+            self.run_cli(cwd, "start", "req-login-timeout")
+            self.run_cli(cwd, "attach-proof", "req-login-timeout", str(proof))
+
+            artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
+            text = artifact.read_text()
+            quality = text.split("## Quality Check", 1)[1]
+            proof_section = quality.split("### Proof", 1)[1].split("### Manual Validation", 1)[0]
+
+            self.assertIn("- [x] [result.pdf](proof/result.pdf)", proof_section)
+            self.assertNotIn("### Attached Proof", text)
+
+    def test_done_requires_resolving_proof_file_under_proof_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            self.run_cli(cwd, "start", "req-login-timeout")
+            artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
+            text = artifact.read_text()
+            text = text.replace("TBD", "Download Neraca as Excel", 1)
+            text = text.replace("- [ ] TBD", "- [x] Acceptance exists", 1)
+            text = text.replace("- [ ] TBD", "- [x] Run build", 1)
+            text = text.replace("- [ ] TBD", "- [x] Implementation complete", 1)
+            text = text.replace("### AI Review\n\nTBD", "### AI Review\n\nNo blocking issues.")
+            text = text.replace("### Human Review\n\nTBD", "### Human Review\n\nLooks correct.")
+            text = text.replace("### Commands Run\n\nTBD", "### Commands Run\n\n- build ok")
+            text = text.replace("### Proof\n\n- [ ] TBD", "### Proof\n\n- [x] [missing.pdf](proof/missing.pdf)")
+            text = text.replace("## Final Approval\n\nTBD", "## Final Approval\n\nApproved.")
+            artifact.write_text(text)
+
+            self.run_cli(cwd, "transition", "req-login-timeout", "planning")
+            self.run_cli(cwd, "approve-planning", "req-login-timeout", "--by", "Liem")
+            self.run_cli(cwd, "transition", "req-login-timeout", "implementation")
+            self.run_cli(cwd, "transition", "req-login-timeout", "review")
+            self.run_cli(cwd, "approve-review", "req-login-timeout", "--by", "Liem")
+            self.run_cli(cwd, "transition", "req-login-timeout", "quality-check")
+            result = self.run_cli(cwd, "transition", "req-login-timeout", "done", check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Quality Check Proof needs at least one checked proof file under proof/", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

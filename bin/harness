@@ -334,7 +334,7 @@ On entry:
 2. Execute every unchecked validation checklist item that is automatable.
 3. Mark executed validation items checked in `## Validation Plan`.
 4. Record exact commands and results under `## Quality Check > Commands Run`.
-5. Attach proof with `harness attach-proof <session-id> <file>` or record manual validation notes.
+5. Attach proof with `harness attach-proof <session-id> <file>`.
 6. Run `harness validate <session-id>` before attempting `done`.
 
 Forbidden:
@@ -349,7 +349,7 @@ Failed validation goes through:
 harness transition <session-id> needs-fix
 ```
 
-Manual auth blockers require human proof notes.
+Manual auth blockers require human validation notes, but quality-check still needs at least one attached proof file under `proof/`.
 """,
         "done.md": """# Done State Guardrails
 
@@ -522,6 +522,27 @@ def has_unchecked_item(value: str) -> bool:
     return bool(re.search(r"^- \[ \] .+", value, re.MULTILINE))
 
 
+def checked_markdown_links(value: str) -> list[str]:
+    return re.findall(r"^- \[[xX]\] \[[^\]]+\]\(([^)]+)\)", value, re.MULTILINE)
+
+
+def proof_links_resolve(session_id: str, value: str) -> bool:
+    links = checked_markdown_links(value)
+    if not links:
+        return False
+    base = artifact_path(session_id).parent
+    allowed = proof_dir(session_id).resolve()
+    for link in links:
+        target = (base / link).resolve()
+        try:
+            target.relative_to(allowed)
+        except ValueError:
+            return False
+        if not target.exists() or not target.is_file():
+            return False
+    return True
+
+
 def planning_snapshot(text: str) -> str:
     parts = [
         "Requirement Summary",
@@ -579,8 +600,8 @@ def validate_requirements(
 
     if check_state == "done":
         quality = section(text, "Quality Check")
-        if not has_checked_item(subsection(quality, "Proof")):
-            missing.append("Quality Check Proof needs at least one checked item")
+        if not proof_links_resolve(session_id, subsection(quality, "Proof")):
+            missing.append("Quality Check Proof needs at least one checked proof file under proof/")
         if not has_real_content(section(text, "Final Approval")):
             missing.append("Final Approval must be recorded")
 
@@ -591,8 +612,8 @@ def validate_requirements(
             missing.append("Validation Plan checklist must be executed and checked off")
         if not has_real_content(subsection(quality, "Commands Run")):
             missing.append("Quality Check Commands Run must record validation commands/results")
-        if not has_checked_item(subsection(quality, "Proof")) and not has_real_content(subsection(quality, "Manual Validation")):
-            missing.append("Quality Check needs checked proof or manual validation notes")
+        if not proof_links_resolve(session_id, subsection(quality, "Proof")):
+            missing.append("Quality Check Proof needs at least one checked proof file under proof/")
 
     if state not in STATES:
         missing.append(f"status must be one of: {', '.join(STATES)}")
@@ -1008,11 +1029,27 @@ def cmd_attach_proof(args: argparse.Namespace) -> None:
     text = read_text(path)
     rel = target.relative_to(path.parent)
     proof_line = f"- [x] [{target.name}]({rel})"
-    if proof_line not in text:
-        text = text.replace("### Proof\n\n- [ ] TBD", f"### Proof\n\n{proof_line}")
-        if proof_line not in text:
-            text += f"\n\n### Attached Proof\n\n{proof_line}\n"
-        path.write_text(text)
+    quality_match = re.search(r"^## Quality Check\s*$", text, re.MULTILINE)
+    if quality_match:
+        proof_match = re.search(r"^### Proof\s*$", text[quality_match.end() :], re.MULTILINE)
+    else:
+        proof_match = None
+    if quality_match and proof_match:
+        proof_content_start = quality_match.end() + proof_match.end()
+        remainder = text[proof_content_start:]
+        next_heading = re.search(r"^### |^## ", remainder, re.MULTILINE)
+        proof_content_end = proof_content_start + (next_heading.start() if next_heading else len(remainder))
+        proof_content = text[proof_content_start:proof_content_end]
+        if proof_line in proof_content:
+            new_proof_content = proof_content
+        elif "- [ ] TBD" in proof_content:
+            new_proof_content = proof_content.replace("- [ ] TBD", proof_line, 1)
+        else:
+            new_proof_content = proof_content.rstrip() + f"\n{proof_line}\n"
+        text = text[:proof_content_start] + new_proof_content + text[proof_content_end:]
+    elif proof_line not in text:
+        text += f"\n\n## Quality Check\n\n### Proof\n\n{proof_line}\n"
+    path.write_text(text)
     update_artifact_meta(args.session_id, {})
     print(f"attached proof: {target}")
 
