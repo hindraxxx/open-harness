@@ -19,9 +19,12 @@ Required:
 - After completing each implementation task, check its item in `## Implementation Checklist`.
 - Before reporting implementation complete, run `harness status <session-id>`.
 - Do not summarize implementation as complete while any implementation checklist item remains unchecked.
+- When implementation is complete, transition to `review`.
+- Do not run validation plan commands, browser validation, screenshots, or proof attachment in `implementation`.
 
 Forbidden:
 
 - expanding scope without returning to planning
 - marking review complete
 - marking quality proof complete
+- recording `## Quality Check` commands/proof/manual validation before `quality-check`

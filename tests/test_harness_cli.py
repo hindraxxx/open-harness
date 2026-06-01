@@ -203,6 +203,28 @@ class HarnessCliTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("Implementation Checklist must be fully checked before review", result.stdout)
 
+    def test_implementation_reports_quality_evidence_recorded_too_early(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            self.run_cli(cwd, "start", "req-login-timeout")
+            artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
+            text = artifact.read_text()
+            text = text.replace("TBD", "Download Neraca as Excel", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Acceptance exists", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Validation exists", 1)
+            text = text.replace("- [ ] TBD", "- [x] Implementation task", 1)
+            artifact.write_text(text)
+
+            self.run_cli(cwd, "transition", "req-login-timeout", "planning")
+            self.run_cli(cwd, "approve-planning", "req-login-timeout", "--by", "Liem")
+            self.run_cli(cwd, "transition", "req-login-timeout", "implementation")
+            artifact.write_text(artifact.read_text().replace("### Commands Run\n\nTBD", "### Commands Run\n\n- premature validation"))
+            result = self.run_cli(cwd, "validate", "req-login-timeout", check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Quality Check evidence exists before quality-check state", result.stdout)
+
     def test_review_to_quality_check_requires_approval(self):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)
@@ -579,8 +601,6 @@ class HarnessCliTest(unittest.TestCase):
             text = text.replace("- [ ] TBD", "- [x] Implementation complete", 1)
             text = text.replace("### AI Review\n\nTBD", "### AI Review\n\nNo blocking issues.")
             text = text.replace("### Human Review\n\nTBD", "### Human Review\n\nLooks correct.")
-            text = text.replace("### Commands Run\n\nTBD", "### Commands Run\n\n- build ok")
-            text = text.replace("### Proof\n\n- [ ] TBD", "### Proof\n\n- [x] [missing.pdf](proof/missing.pdf)")
             text = text.replace("## Final Approval\n\nTBD", "## Final Approval\n\nApproved.")
             artifact.write_text(text)
 
@@ -590,6 +610,10 @@ class HarnessCliTest(unittest.TestCase):
             self.run_cli(cwd, "transition", "req-login-timeout", "review")
             self.run_cli(cwd, "approve-review", "req-login-timeout", "--by", "Liem")
             self.run_cli(cwd, "transition", "req-login-timeout", "quality-check")
+            text = artifact.read_text()
+            text = text.replace("### Commands Run\n\nTBD", "### Commands Run\n\n- build ok")
+            text = text.replace("### Proof\n\n- [ ] TBD", "### Proof\n\n- [x] [missing.pdf](proof/missing.pdf)")
+            artifact.write_text(text)
             result = self.run_cli(cwd, "transition", "req-login-timeout", "done", check=False)
 
             self.assertNotEqual(result.returncode, 0)

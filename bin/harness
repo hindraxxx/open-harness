@@ -302,12 +302,15 @@ Required:
 - After completing each implementation task, check its item in `## Implementation Checklist`.
 - Before reporting implementation complete, run `harness status <session-id>`.
 - Do not summarize implementation as complete while any implementation checklist item remains unchecked.
+- When implementation is complete, transition to `review`.
+- Do not run validation plan commands, browser validation, screenshots, or proof attachment in `implementation`.
 
 Forbidden:
 
 - expanding scope without returning to planning
 - marking review complete
 - marking quality proof complete
+- recording `## Quality Check` commands/proof/manual validation before `quality-check`
 """,
         "review.md": """# Review State Guardrails
 
@@ -591,6 +594,33 @@ def planning_snapshot(text: str) -> str:
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
+def quality_evidence_present(text: str) -> bool:
+    quality = section(text, "Quality Check")
+    if not quality:
+        return False
+    commands = subsection(quality, "Commands Run")
+    proof = subsection(quality, "Proof")
+    manual = subsection(quality, "Manual Validation")
+    return (
+        has_real_content(commands)
+        or has_checked_item(proof)
+        or bool(checked_markdown_links(proof))
+        or has_real_content(manual)
+    )
+
+
+def next_action_for_state(state: str) -> str:
+    return {
+        "start": "transition to planning",
+        "planning": "fill planning artifact sections, get human planning approval, then transition to implementation",
+        "implementation": "finish code, check every implementation checklist item, then transition to review; do not run quality validation here",
+        "needs-fix": "fix required items, check implementation checklist items, then transition to implementation/review",
+        "review": "record AI/human review, get human review approval, then transition to quality-check",
+        "quality-check": "execute validation plan, attach proof files, then transition to done",
+        "done": "no next action",
+    }.get(state, "unknown")
+
+
 def validate_requirements(
     session_id: str,
     target: str | None = None,
@@ -601,6 +631,9 @@ def validate_requirements(
     state = current_state(session_id)
     check_state = target or state
     missing = []
+
+    if state not in {"quality-check", "done"} and quality_evidence_present(text):
+        missing.append("Quality Check evidence exists before quality-check state; transition through review before validation")
 
     if check_state in {"planning", "implementation", "review", "quality-check", "done"}:
         if not has_real_content(section(text, "Acceptance Criteria")):
@@ -929,6 +962,7 @@ def cmd_status(args: argparse.Namespace) -> None:
     print(f"Linear issue: {data.get('linear_issue_key') or 'none'}")
     print(f"Common guardrail: {agents_dir() / 'common.md'}")
     print(f"State guardrail: {agents_dir() / (state + '.md')}")
+    print(f"Next action: {next_action_for_state(state)}")
     if state in {"implementation", "needs-fix"}:
         print("Edit gate: allowed")
     else:

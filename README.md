@@ -159,6 +159,8 @@ bin/harness transition req-login-timeout quality-check
 
 During `implementation`, every item in `## Implementation Checklist` must be checked before review. If product files changed while checklist items remain unchecked, `harness status` and `harness validate` report the missing checklist work.
 
+Implementation must not run quality validation. If `## Quality Check` commands/proof/manual validation are recorded before the session reaches `quality-check`, `harness status` and `harness validate` report a phase violation.
+
 Inside `quality-check`, the agent must execute the artifact `## Validation Plan`, check off completed validation items, record commands/results under `## Quality Check > Commands Run`, and attach proof with `harness attach-proof`. `harness status` and `harness validate` report missing quality evidence until a checked proof link resolves to a file under the session `proof/` directory.
 
 Attach proof:
