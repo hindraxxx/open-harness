@@ -163,6 +163,21 @@ Implementation must not run quality validation. If `## Quality Check` commands/p
 
 Inside `quality-check`, the agent must execute the artifact `## Validation Plan`, check off completed validation items, record commands/results under `## Quality Check > Commands Run`, and attach proof with `harness attach-proof`. `harness status` and `harness validate` report missing quality evidence until a checked proof link resolves to a file under the session `proof/` directory.
 
+Quality proof policy is configured in `.harness/harness.yml`:
+
+```yaml
+quality_gate:
+  required_proof: auto
+```
+
+Supported values:
+
+- `auto`: infer backend/frontend expectations from the validation plan and project map.
+- `backend`: require a curl command and sample response/status.
+- `frontend`: require screenshot proof and view/browser validation notes.
+- `both`: require backend and frontend proof.
+- `manual`: require only generic commands/results and attached proof.
+
 Attach proof:
 
 ```bash

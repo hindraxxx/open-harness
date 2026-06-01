@@ -38,6 +38,26 @@ class HarnessCliTest(unittest.TestCase):
             self.fail(f"command failed: {args}\nstdout={result.stdout}\nstderr={result.stderr}")
         return result
 
+    def enter_quality_check(self, cwd: Path, validation_item: str = "Run validation") -> Path:
+        self.run_cli(cwd, "init")
+        self.run_cli(cwd, "start", "req-login-timeout")
+        artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
+        text = artifact.read_text()
+        text = text.replace("TBD", "Download Neraca as Excel", 1)
+        text = text.replace("- [ ] TBD", "- [x] Acceptance exists", 1)
+        text = text.replace("- [ ] TBD", f"- [x] {validation_item}", 1)
+        text = text.replace("- [ ] TBD", "- [x] Implementation complete", 1)
+        text = text.replace("### AI Review\n\nTBD", "### AI Review\n\nNo blocking issues.")
+        text = text.replace("### Human Review\n\nTBD", "### Human Review\n\nLooks correct.")
+        artifact.write_text(text)
+        self.run_cli(cwd, "transition", "req-login-timeout", "planning")
+        self.run_cli(cwd, "approve-planning", "req-login-timeout", "--by", "Liem")
+        self.run_cli(cwd, "transition", "req-login-timeout", "implementation")
+        self.run_cli(cwd, "transition", "req-login-timeout", "review")
+        self.run_cli(cwd, "approve-review", "req-login-timeout", "--by", "Liem")
+        self.run_cli(cwd, "transition", "req-login-timeout", "quality-check")
+        return artifact
+
     def test_init_creates_project_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)
@@ -368,6 +388,79 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("synced project map", result.stdout)
             self.assertIn("Build Commands", (project / "validation.md").read_text())
             self.assertEqual("session artifact\n", artifact.read_text())
+
+    def test_backend_quality_gate_requires_curl_and_sample_response(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            artifact = self.enter_quality_check(cwd, "Backend API validation")
+            config = cwd / ".harness" / "harness.yml"
+            config.write_text(config.read_text().replace("required_proof: auto", "required_proof: backend"))
+            proof = cwd / "backend-proof.txt"
+            proof.write_text("ok\n")
+            self.run_cli(cwd, "attach-proof", "req-login-timeout", str(proof))
+            text = artifact.read_text()
+            text = text.replace("### Commands Run\n\nTBD", "### Commands Run\n\n- php artisan test: PASS")
+            artifact.write_text(text)
+
+            result = self.run_cli(cwd, "validate", "req-login-timeout", check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Backend proof requires a curl command", result.stdout)
+            self.assertIn("Backend proof requires a sample response", result.stdout)
+
+            text = artifact.read_text()
+            text = text.replace(
+                "### Commands Run\n\n- php artisan test: PASS",
+                "### Commands Run\n\n- curl -i http://localhost/api/neraca\n- Sample response: HTTP/1.1 200 OK {\"ok\":true}",
+            )
+            artifact.write_text(text)
+            self.assertEqual(0, self.run_cli(cwd, "validate", "req-login-timeout").returncode)
+
+    def test_frontend_quality_gate_requires_screenshot_and_view_validation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            artifact = self.enter_quality_check(cwd, "Frontend UI validation")
+            config = cwd / ".harness" / "harness.yml"
+            config.write_text(config.read_text().replace("required_proof: auto", "required_proof: frontend"))
+            proof = cwd / "result.txt"
+            proof.write_text("ok\n")
+            self.run_cli(cwd, "attach-proof", "req-login-timeout", str(proof))
+            text = artifact.read_text()
+            text = text.replace("### Commands Run\n\nTBD", "### Commands Run\n\n- npm test: PASS")
+            artifact.write_text(text)
+
+            result = self.run_cli(cwd, "validate", "req-login-timeout", check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Frontend proof requires screenshot proof", result.stdout)
+            self.assertIn("Frontend proof requires view validation", result.stdout)
+
+            screenshot = cwd / "screenshot.png"
+            screenshot.write_text("png\n")
+            self.run_cli(cwd, "attach-proof", "req-login-timeout", str(screenshot))
+            text = artifact.read_text()
+            text = text.replace("### Manual Validation\n\nTBD", "### Manual Validation\n\nView validated in browser.")
+            artifact.write_text(text)
+            self.assertEqual(0, self.run_cli(cwd, "validate", "req-login-timeout").returncode)
+
+    def test_both_quality_gate_requires_backend_and_frontend_proof(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            artifact = self.enter_quality_check(cwd, "Full stack validation")
+            config = cwd / ".harness" / "harness.yml"
+            config.write_text(config.read_text().replace("required_proof: auto", "required_proof: both"))
+            screenshot = cwd / "screenshot.png"
+            screenshot.write_text("png\n")
+            self.run_cli(cwd, "attach-proof", "req-login-timeout", str(screenshot))
+            text = artifact.read_text()
+            text = text.replace(
+                "### Commands Run\n\nTBD",
+                "### Commands Run\n\n- curl -i http://localhost/api/neraca\n- Sample response: status 200",
+            )
+            text = text.replace("### Manual Validation\n\nTBD", "### Manual Validation\n\nView validated in browser.")
+            artifact.write_text(text)
+
+            self.assertEqual(0, self.run_cli(cwd, "validate", "req-login-timeout").returncode)
 
     def test_missing_linear_token_blocks_only_sync(self):
         with tempfile.TemporaryDirectory() as tmp:

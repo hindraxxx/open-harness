@@ -25,3 +25,11 @@ harness transition <session-id> needs-fix
 ```
 
 Manual auth blockers require human validation notes, but quality-check still needs at least one attached proof file under `proof/`.
+
+Proof policy is configured in `.harness/harness.yml`:
+
+- `auto`: infer backend/frontend expectations from the validation plan and project map.
+- `backend`: require a curl command and sample response.
+- `frontend`: require screenshot proof and view validation notes.
+- `both`: require backend and frontend proof.
+- `manual`: require generic proof only.

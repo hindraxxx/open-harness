@@ -484,6 +484,25 @@ Project-map rules:
 - The current repo code remains the source of truth.
 - During planning, agents must read `.harness/project/index.md`, verify relevant facts by repo search or file inspection, update stale or missing map sections, then fill the session artifact.
 
+## Quality Gate Proof Policy
+
+Add configurable quality-check proof requirements in `.harness/harness.yml`:
+
+```yaml
+quality_gate:
+  required_proof: auto
+```
+
+Supported values:
+
+- `auto`: infer backend/frontend expectations from the validation plan and project map.
+- `backend`: require a curl command and sample response/status.
+- `frontend`: require screenshot proof and view/browser validation notes.
+- `both`: require backend and frontend proof.
+- `manual`: require only generic commands/results and attached proof.
+
+The quality-check guardrail tells agents to follow this policy. `harness validate` and `harness transition <session-id> done` enforce it.
+
 ## Test Plan
 
 - `harness init` creates `.harness/`, templates, agent guardrails, `AGENTS.md`, `.env.example`, and `.gitignore` rule.
@@ -504,6 +523,9 @@ Project-map rules:
 - `harness transition req-login-timeout quality-check` blocks until `harness approve-review req-login-timeout --by <name>` has been run.
 - `harness transition req-login-timeout planning` auto-syncs the Linear issue to `Planning` when Linear is configured.
 - `harness validate req-login-timeout` fails in `quality-check` until the validation plan is executed and proof/results are recorded.
+- `harness validate req-login-timeout` enforces backend proof policy with curl plus sample response/status when configured or inferred.
+- `harness validate req-login-timeout` enforces frontend proof policy with screenshot plus view/browser validation notes when configured or inferred.
+- `harness validate req-login-timeout` enforces both backend and frontend proof when `quality_gate.required_proof: both`.
 - `harness attach-proof req-login-timeout <file>` copies proof into the session `proof/` directory and records the checked link under `## Quality Check > Proof`.
 - Planning guardrails require reading `.harness/project/index.md`, verifying map facts against the repo, and updating stale or missing map sections before writing acceptance criteria.
 - Missing `.env` allows local-only operation.

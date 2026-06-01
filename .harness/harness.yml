@@ -18,3 +18,5 @@ linear_state_map:
   needs-fix: In Progress
   quality-check: Quality Check
   done: Done
+quality_gate:
+  required_proof: auto

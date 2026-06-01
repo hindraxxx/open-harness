@@ -117,6 +117,8 @@ linear_state_map:
   needs-fix: In Progress
   quality-check: Quality Check
   done: Done
+quality_gate:
+  required_proof: auto
 """
 
 
@@ -513,6 +515,14 @@ harness transition <session-id> needs-fix
 ```
 
 Manual auth blockers require human validation notes, but quality-check still needs at least one attached proof file under `proof/`.
+
+Proof policy is configured in `.harness/harness.yml`:
+
+- `auto`: infer backend/frontend expectations from the validation plan and project map.
+- `backend`: require a curl command and sample response.
+- `frontend`: require screenshot proof and view validation notes.
+- `both`: require backend and frontend proof.
+- `manual`: require generic proof only.
 """,
         "done.md": """# Done State Guardrails
 
@@ -741,6 +751,30 @@ def proof_links_resolve(session_id: str, value: str) -> bool:
     return True
 
 
+def proof_link_targets(session_id: str, value: str) -> list[Path]:
+    targets = []
+    base = artifact_path(session_id).parent
+    allowed = proof_dir(session_id).resolve()
+    for link in checked_markdown_links(value):
+        target = (base / link).resolve()
+        try:
+            target.relative_to(allowed)
+        except ValueError:
+            continue
+        if target.exists() and target.is_file():
+            targets.append(target)
+    return targets
+
+
+def has_screenshot_proof(session_id: str, value: str) -> bool:
+    screenshot_exts = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".pdf"}
+    for target in proof_link_targets(session_id, value):
+        name = target.name.lower()
+        if target.suffix.lower() in screenshot_exts or "screenshot" in name:
+            return True
+    return False
+
+
 def planning_snapshot(text: str) -> str:
     parts = [
         "Requirement Summary",
@@ -783,6 +817,86 @@ def next_action_for_state(state: str) -> str:
         "quality-check": "execute validation plan, attach proof files, then transition to done",
         "done": "no next action",
     }.get(state, "unknown")
+
+
+def quality_gate_mode() -> str:
+    default = "auto"
+    path = harness_dir() / "harness.yml"
+    if not path.exists():
+        return default
+    lines = path.read_text().splitlines()
+    in_gate = False
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped == "quality_gate:":
+            in_gate = True
+            continue
+        if in_gate:
+            if not line.startswith("  "):
+                break
+            if ":" not in stripped:
+                continue
+            key, value = stripped.split(":", 1)
+            if key == "required_proof":
+                mode = value.strip().strip('"').strip("'").lower()
+                if mode in {"auto", "backend", "frontend", "both", "manual"}:
+                    return mode
+    return default
+
+
+def project_map_text() -> str:
+    path = project_map_dir()
+    if not path.exists():
+        return ""
+    chunks = []
+    for name in ["overview.md", "architecture.md", "conventions.md", "validation.md", "risks.md"]:
+        file_path = path / name
+        if file_path.exists():
+            chunks.append(file_path.read_text(errors="ignore"))
+    return "\n".join(chunks)
+
+
+def inferred_quality_gate(text: str) -> str:
+    mode = quality_gate_mode()
+    if mode != "auto":
+        return mode
+    haystack = f"{section(text, 'Validation Plan')}\n{project_map_text()}".lower()
+    backend_terms = ["backend", "api", "endpoint", "curl", "http", "request", "response", "controller"]
+    frontend_terms = ["frontend", "fe", "ui", "browser", "playwright", "screenshot", "view", "component", "page"]
+    is_backend = any(term in haystack for term in backend_terms)
+    is_frontend = any(term in haystack for term in frontend_terms)
+    if is_backend and is_frontend:
+        return "both"
+    if is_backend:
+        return "backend"
+    if is_frontend:
+        return "frontend"
+    return "manual"
+
+
+def quality_gate_missing(session_id: str, text: str) -> list[str]:
+    mode = inferred_quality_gate(text)
+    if mode == "manual":
+        return []
+    quality = section(text, "Quality Check")
+    commands = subsection(quality, "Commands Run")
+    proof = subsection(quality, "Proof")
+    manual = subsection(quality, "Manual Validation")
+    combined = f"{commands}\n{manual}".lower()
+    missing = []
+    if mode in {"backend", "both"}:
+        if "curl" not in commands.lower():
+            missing.append("Backend proof requires a curl command under Quality Check Commands Run")
+        if not re.search(r"\b(sample response|response|http/[0-9.]+|status[: ]+\d{3}|status code[: ]+\d{3})\b", combined):
+            missing.append("Backend proof requires a sample response or HTTP status/result")
+    if mode in {"frontend", "both"}:
+        if not has_screenshot_proof(session_id, proof):
+            missing.append("Frontend proof requires screenshot proof attached under proof/")
+        if not re.search(r"\b(view|screen|page|ui|browser|playwright|screenshot)\b", combined):
+            missing.append("Frontend proof requires view validation notes or browser validation result")
+    return missing
 
 
 def validate_requirements(
@@ -864,6 +978,7 @@ def validate_requirements(
             missing.append("Quality Check Commands Run must record validation commands/results")
         if not proof_links_resolve(session_id, subsection(quality, "Proof")):
             missing.append("Quality Check Proof needs at least one checked proof file under proof/")
+        missing.extend(quality_gate_missing(session_id, text))
 
     if state not in STATES:
         missing.append(f"status must be one of: {', '.join(STATES)}")
