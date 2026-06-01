@@ -326,6 +326,15 @@ Agents must not run `approve-review` unless the user explicitly instructs them t
 
 Run validation from the artifact and attach proof.
 
+On entry:
+
+1. Read `## Validation Plan`.
+2. Execute every unchecked validation checklist item that is automatable.
+3. Mark executed validation items checked in `## Validation Plan`.
+4. Record exact commands and results under `## Quality Check > Commands Run`.
+5. Attach proof with `harness attach-proof <session-id> <file>` or record manual validation notes.
+6. Run `harness validate <session-id>` before attempting `done`.
+
 Forbidden:
 
 - product code edits while still in quality-check
@@ -506,7 +515,15 @@ def has_checked_item(value: str) -> bool:
     return bool(re.search(r"^- \[[xX]\] .+", value, re.MULTILINE))
 
 
-def validate_requirements(session_id: str, target: str | None = None) -> list[str]:
+def has_unchecked_item(value: str) -> bool:
+    return bool(re.search(r"^- \[ \] .+", value, re.MULTILINE))
+
+
+def validate_requirements(
+    session_id: str,
+    target: str | None = None,
+    require_quality_execution: bool = True,
+) -> list[str]:
     path = artifact_path(session_id)
     text = read_text(path)
     state = current_state(session_id)
@@ -544,6 +561,16 @@ def validate_requirements(session_id: str, target: str | None = None) -> list[st
             missing.append("Quality Check Proof needs at least one checked item")
         if not has_real_content(section(text, "Final Approval")):
             missing.append("Final Approval must be recorded")
+
+    if check_state in {"quality-check", "done"} and require_quality_execution:
+        validation_plan = section(text, "Validation Plan")
+        quality = section(text, "Quality Check")
+        if has_unchecked_item(validation_plan):
+            missing.append("Validation Plan checklist must be executed and checked off")
+        if not has_real_content(subsection(quality, "Commands Run")):
+            missing.append("Quality Check Commands Run must record validation commands/results")
+        if not has_checked_item(subsection(quality, "Proof")) and not has_real_content(subsection(quality, "Manual Validation")):
+            missing.append("Quality Check needs checked proof or manual validation notes")
 
     if state not in STATES:
         missing.append(f"status must be one of: {', '.join(STATES)}")
@@ -918,7 +945,11 @@ def cmd_transition(args: argparse.Namespace) -> None:
     state = current_state(args.session_id)
     if args.state not in TRANSITIONS[state]:
         die(f"invalid transition: {state} -> {args.state}")
-    missing = validate_requirements(args.session_id, args.state)
+    missing = validate_requirements(
+        args.session_id,
+        args.state,
+        require_quality_execution=args.state != "quality-check",
+    )
     if missing:
         print("transition blocked")
         for item in missing:

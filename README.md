@@ -155,6 +155,8 @@ bin/harness transition req-login-timeout quality-check
 
 `review -> quality-check` requires explicit human review approval. Agents must not run `approve-review` unless the user explicitly approves the review.
 
+Inside `quality-check`, the agent must execute the artifact `## Validation Plan`, check off completed validation items, record commands/results under `## Quality Check > Commands Run`, and attach proof or manual validation notes. `harness status` and `harness validate` report missing quality evidence until this is done.
+
 Attach proof:
 
 ```bash

@@ -237,6 +237,12 @@ Validates and updates local artifact status. If Linear is configured, syncs the 
 
 Checks whether the artifact satisfies the requirements for its current state or target transition.
 
+In `quality-check`, validation must report missing work until:
+
+- all `## Validation Plan` checklist items are checked or explicitly moved to manual validation notes
+- `## Quality Check > Commands Run` records command/results
+- proof or manual validation notes exist
+
 ### `harness preflight-edit <session-id>`
 
 Hard gate before product code edits.
@@ -450,6 +456,7 @@ These instructions guide agent behavior. They do not replace CLI validation.
 - `harness transition req-login-timeout implementation` blocks until `harness approve-planning req-login-timeout --by <name>` has been run.
 - `harness transition req-login-timeout quality-check` blocks until `harness approve-review req-login-timeout --by <name>` has been run.
 - `harness transition req-login-timeout planning` auto-syncs the Linear issue to `Planning` when Linear is configured.
+- `harness validate req-login-timeout` fails in `quality-check` until the validation plan is executed and proof/results are recorded.
 - Missing `.env` allows local-only operation.
 - Missing `LINEAR_API_KEY` blocks only Linear sync.
 - Invalid transitions fail with actionable missing checklist fields.
