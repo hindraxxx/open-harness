@@ -300,6 +300,30 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("preflight-edit", text)
             self.assertIn("If preflight blocks", text)
 
+    def test_sync_guardrails_requires_force(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+
+            result = self.run_cli(cwd, "sync-guardrails", check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("--force", result.stderr)
+
+    def test_sync_guardrails_force_overwrites_agent_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            (cwd / "AGENTS.md").write_text("old\n")
+            (cwd / ".harness" / "agents" / "implementation.md").write_text("old\n")
+
+            result = self.run_cli(cwd, "sync-guardrails", "--force")
+
+            self.assertIn("synced harness guardrails", result.stdout)
+            self.assertIn("- AGENTS.md", result.stdout)
+            self.assertIn("preflight-edit", (cwd / "AGENTS.md").read_text())
+            self.assertIn("Implementation State Guardrails", (cwd / ".harness" / "agents" / "implementation.md").read_text())
+
     def test_missing_linear_token_blocks_only_sync(self):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)

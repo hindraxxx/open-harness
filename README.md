@@ -201,10 +201,16 @@ Edit `.harness/harness.yml` if your Linear workflow uses different status names.
 If a project already ran `harness init`, refresh its root `AGENTS.md` and `.harness/agents/*.md` guardrails:
 
 ```bash
-harness upgrade-guardrails
+harness sync-guardrails --force
 ```
 
 Use this after CLI upgrades. It overwrites only the agent guardrail files and root `AGENTS.md`.
+
+Legacy alias:
+
+```bash
+harness upgrade-guardrails
+```
 
 ## Agent Flow
 

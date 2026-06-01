@@ -171,7 +171,7 @@ TBD
 
 ### Required Fixes
 
-- [ ] TBD
+None.
 
 ## Quality Check
 
@@ -214,9 +214,19 @@ Before doing harness work:
 - Treat `.harness/sessions/<session-id>/artifact.md` as canonical.
 - Use `harness transition` for phase changes.
 - Never bypass CLI transition guards by editing artifact status manually.
+- Never edit approval metadata or hashes manually.
 - Never edit product code unless `harness preflight-edit <session-id>` exits 0.
 - If preflight blocks, stop and report the missing phase or artifact requirements.
 - Never write `.env` secrets into artifacts, logs, comments, or proof files.
+- Do not fill review, quality-check, proof, or final approval sections before their state.
+- Run `harness validate <session-id>` before every transition.
+
+## Gate Order
+
+1. `planning` -> `implementation`: requires filled requirement summary, acceptance criteria checklist, validation plan checklist, implementation checklist, and explicit human planning approval.
+2. `implementation` -> `review`: requires the implementation checklist to be fully checked.
+3. `review` -> `quality-check`: requires AI review, human review, no unresolved required fixes, and explicit human review approval.
+4. `quality-check` -> `done`: requires validation execution, recorded commands, attached proof file under `proof/`, and final approval.
 
 ## Edit Gate
 
@@ -280,6 +290,14 @@ harness transition <session-id> implementation
 `harness validate <session-id>` must show no missing planning fields before asking for human approval.
 
 Agents must not run `approve-planning` unless the user explicitly instructs them to approve planning.
+
+Planning must include real checklist items in:
+
+- `## Acceptance Criteria`
+- `## Validation Plan`
+- `## Implementation Checklist`
+
+Do not transition to implementation with placeholder `TBD` checklist items.
 """,
         "implementation.md": """# Implementation State Guardrails
 
@@ -302,7 +320,7 @@ Required:
 - After completing each implementation task, check its item in `## Implementation Checklist`.
 - Before reporting implementation complete, run `harness status <session-id>`.
 - Do not summarize implementation as complete while any implementation checklist item remains unchecked.
-- When implementation is complete, transition to `review`.
+- Transition to `review` only after every implementation checklist item is checked.
 - Do not run validation plan commands, browser validation, screenshots, or proof attachment in `implementation`.
 
 Forbidden:
@@ -335,6 +353,13 @@ harness transition <session-id> quality-check
 ```
 
 Agents must not run `approve-review` unless the user explicitly instructs them to approve review.
+
+Before quality-check:
+
+- `## Implementation Checklist` must be fully checked.
+- `## Review > AI Review` must be filled.
+- `## Review > Human Review` must be filled.
+- `## Review > Required Fixes` must be `None.` or all required fix checklist items must be resolved through `needs-fix`.
 """,
         "quality-check.md": """# Quality Check State Guardrails
 
@@ -342,6 +367,7 @@ Run validation from the artifact and attach proof.
 
 On entry:
 
+0. Confirm `harness status <session-id>` shows state `quality-check` and `Missing: none`.
 1. Read `## Validation Plan`.
 2. Execute every unchecked validation checklist item that is automatable.
 3. Mark executed validation items checked in `## Validation Plan`.
@@ -398,11 +424,17 @@ If preflight blocks, stop and report the blocker.
 """
 
 
-def overwrite_guardrails() -> None:
+def overwrite_guardrails() -> list[Path]:
+    written = []
     agents_dir().mkdir(parents=True, exist_ok=True)
     for name, content in default_agents().items():
-        (agents_dir() / name).write_text(content)
-    (root() / "AGENTS.md").write_text(default_agents_bootstrap())
+        path = agents_dir() / name
+        path.write_text(content)
+        written.append(path)
+    path = root() / "AGENTS.md"
+    path.write_text(default_agents_bootstrap())
+    written.append(path)
+    return written
 
 
 def non_harness_changes() -> list[str]:
@@ -556,6 +588,10 @@ def has_any_checklist_item(value: str) -> bool:
     return bool(re.search(r"^-\s*\[[ xX]\]\s+.+", value, re.MULTILINE))
 
 
+def checklist_complete(value: str) -> bool:
+    return has_any_checklist_item(value) and not has_unchecked_item(value)
+
+
 def checked_markdown_links(value: str) -> list[str]:
     return re.findall(r"^-\s*\[[xX]\]\s+\[[^\]]+\]\(([^)]+)\)", value, re.MULTILINE)
 
@@ -636,12 +672,21 @@ def validate_requirements(
         missing.append("Quality Check evidence exists before quality-check state; transition through review before validation")
 
     if check_state in {"planning", "implementation", "review", "quality-check", "done"}:
-        if not has_real_content(section(text, "Acceptance Criteria")):
+        acceptance_criteria = section(text, "Acceptance Criteria")
+        validation_plan = section(text, "Validation Plan")
+        implementation_checklist = section(text, "Implementation Checklist")
+        if not has_real_content(acceptance_criteria):
             missing.append("Acceptance Criteria must be filled")
-        if not has_real_content(section(text, "Validation Plan")):
+        if not has_any_checklist_item(acceptance_criteria):
+            missing.append("Acceptance Criteria must contain checklist items")
+        if not has_real_content(validation_plan):
             missing.append("Validation Plan must be filled")
-        if not has_real_content(section(text, "Implementation Checklist")):
+        if not has_any_checklist_item(validation_plan):
+            missing.append("Validation Plan must contain checklist items")
+        if not has_real_content(implementation_checklist):
             missing.append("Implementation Checklist must be filled")
+        if not has_any_checklist_item(implementation_checklist):
+            missing.append("Implementation Checklist must contain actionable checklist items")
 
     if check_state == "planning":
         if not has_real_content(section(text, "Requirement Summary")):
@@ -654,25 +699,23 @@ def validate_requirements(
         elif data.get("planning_approved_hash") != planning_snapshot(text):
             missing.append("Planning sections changed after approval; rerun `harness approve-planning <session-id> --by <name>`")
 
-    implementation_checklist = section(text, "Implementation Checklist")
     if check_state == "implementation":
-        if not has_any_checklist_item(implementation_checklist):
-            missing.append("Implementation Checklist must contain actionable checklist items")
-        elif non_harness_changes() and has_unchecked_item(implementation_checklist):
+        if non_harness_changes() and has_unchecked_item(implementation_checklist):
             missing.append("Implementation Checklist has unchecked items while product changes exist")
 
     if check_state in {"review", "quality-check", "done"}:
-        if not has_checked_item(implementation_checklist):
-            missing.append("Implementation Checklist needs at least one checked item")
-        if has_unchecked_item(implementation_checklist):
+        if not checklist_complete(implementation_checklist):
             missing.append("Implementation Checklist must be fully checked before review")
 
     if check_state in {"quality-check", "done"}:
         review = section(text, "Review")
+        required_fixes = subsection(review, "Required Fixes")
         if not has_real_content(subsection(review, "AI Review")):
             missing.append("AI Review must be recorded")
         if not has_real_content(subsection(review, "Human Review")):
             missing.append("Human Review must be recorded")
+        if has_unchecked_item(required_fixes):
+            missing.append("Review Required Fixes must be resolved before quality-check")
         data, _ = parse_frontmatter(text)
         if data.get("review_approved") != "true":
             missing.append("Human review must be approved with `harness approve-review <session-id> --by <name>`")
@@ -909,9 +952,20 @@ def cmd_init(_args: argparse.Namespace) -> None:
     print("initialized harness")
 
 
+def print_synced_guardrails(written: list[Path]) -> None:
+    print("synced harness guardrails")
+    for path in written:
+        print(f"- {path.relative_to(root())}")
+
+
+def cmd_sync_guardrails(args: argparse.Namespace) -> None:
+    if not args.force:
+        die("sync-guardrails overwrites AGENTS.md and .harness/agents/*.md; rerun with --force")
+    print_synced_guardrails(overwrite_guardrails())
+
+
 def cmd_upgrade_guardrails(_args: argparse.Namespace) -> None:
-    overwrite_guardrails()
-    print("upgraded harness guardrails")
+    print_synced_guardrails(overwrite_guardrails())
 
 
 def cmd_start(args: argparse.Namespace) -> None:
@@ -1174,6 +1228,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     upgrade_p = sub.add_parser("upgrade-guardrails")
     upgrade_p.set_defaults(func=cmd_upgrade_guardrails)
+
+    sync_guardrails_p = sub.add_parser("sync-guardrails")
+    sync_guardrails_p.add_argument("--force", action="store_true")
+    sync_guardrails_p.set_defaults(func=cmd_sync_guardrails)
 
     start_p = sub.add_parser("start")
     start_p.add_argument("session_id")
