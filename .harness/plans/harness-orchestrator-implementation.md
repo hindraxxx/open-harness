@@ -82,7 +82,9 @@ Linear must never replace the Markdown artifact as the source of truth.
 
 ### `.env`
 
-`.env` is the local secret/config source:
+Linear config is read from project `.env`, global `~/.config/harness/.env`, or process environment variables.
+
+Project `.env` is an optional local override:
 
 ```env
 LINEAR_API_KEY=
@@ -94,6 +96,7 @@ Rules:
 
 - `.env` must be gitignored.
 - `.env.example` may be committed with placeholders.
+- Global `~/.config/harness/.env` is recommended for shared personal credentials.
 - `LINEAR_API_KEY` must never be written to artifacts, logs, proof files, or folder names.
 - Missing `.env` must not block local-only harness usage.
 
@@ -286,7 +289,13 @@ Requires:
 
 ## Linear Integration
 
-Linear config comes from `.env`:
+Linear config is loaded in this precedence order:
+
+1. Project `.env`
+2. Global `~/.config/harness/.env`
+3. Process environment variables
+
+Supported keys:
 
 ```env
 LINEAR_API_KEY=
@@ -298,8 +307,8 @@ Behavior:
 
 - Local artifact state is updated first.
 - Linear sync happens after local state is valid.
-- Missing `.env` allows local-only operation.
-- Missing `LINEAR_API_KEY` blocks only Linear sync.
+- Missing project `.env` allows local-only operation.
+- Missing `LINEAR_API_KEY` across all config sources blocks only Linear sync.
 - Linear issue key is stored in artifact metadata.
 - Linear comments summarize transitions and proof, but do not duplicate the full artifact.
 - Linear sync failure must report the error and leave the local artifact intact.

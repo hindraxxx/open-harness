@@ -104,7 +104,7 @@ initial_state: start
 
 
 def default_env_example() -> str:
-    return "LINEAR_API_KEY=\nLINEAR_TEAM_ID=\nLINEAR_PROJECT_ID=\n"
+    return "# Optional project override. Prefer global secrets in ~/.config/harness/.env.\nLINEAR_API_KEY=\nLINEAR_TEAM_ID=\nLINEAR_PROJECT_ID=\n"
 
 
 def default_template() -> str:
@@ -349,8 +349,7 @@ def validate_requirements(session_id: str, target: str | None = None) -> list[st
     return missing
 
 
-def load_env() -> dict[str, str]:
-    path = root() / ".env"
+def parse_env_file(path: Path) -> dict[str, str]:
     values = {}
     if not path.exists():
         return values
@@ -360,6 +359,26 @@ def load_env() -> dict[str, str]:
             continue
         key, value = line.split("=", 1)
         values[key.strip()] = value.strip()
+    return values
+
+
+def global_env_path() -> Path:
+    override = os.environ.get("HARNESS_GLOBAL_ENV")
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".config" / "harness" / ".env"
+
+
+def load_env() -> dict[str, str]:
+    values = {}
+    # Lowest precedence: real environment.
+    for key in ["LINEAR_API_KEY", "LINEAR_TEAM_ID", "LINEAR_PROJECT_ID"]:
+        if os.environ.get(key):
+            values[key] = os.environ[key]
+    # Middle precedence: global harness env.
+    values.update({k: v for k, v in parse_env_file(global_env_path()).items() if v})
+    # Highest precedence: project-local override.
+    values.update({k: v for k, v in parse_env_file(root() / ".env").items() if v})
     return values
 
 
@@ -473,7 +492,7 @@ def cmd_attach_proof(args: argparse.Namespace) -> None:
 def cmd_sync_linear(args: argparse.Namespace) -> None:
     env = load_env()
     if not env.get("LINEAR_API_KEY"):
-        die("missing LINEAR_API_KEY in .env; local artifact unchanged")
+        die("missing LINEAR_API_KEY in project .env, global ~/.config/harness/.env, or environment; local artifact unchanged")
     data = artifact_meta(args.session_id)
     if not data.get("linear_issue_key"):
         die("artifact has no linear_issue_key")
