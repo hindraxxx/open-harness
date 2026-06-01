@@ -46,6 +46,7 @@ class HarnessCliTest(unittest.TestCase):
             self.assertTrue((cwd / ".harness" / "harness.yml").exists())
             self.assertTrue((cwd / ".harness" / "templates" / "session.md").exists())
             self.assertTrue((cwd / ".harness" / "agents" / "planning.md").exists())
+            self.assertTrue((cwd / ".harness" / "project" / "index.md").exists())
             self.assertTrue((cwd / "AGENTS.md").exists())
             self.assertIn(".env", (cwd / ".gitignore").read_text().splitlines())
 
@@ -323,6 +324,50 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("- AGENTS.md", result.stdout)
             self.assertIn("preflight-edit", (cwd / "AGENTS.md").read_text())
             self.assertIn("Implementation State Guardrails", (cwd / ".harness" / "agents" / "implementation.md").read_text())
+            self.assertIn(".harness/project/index.md", (cwd / "AGENTS.md").read_text())
+            self.assertIn("Read `.harness/project/index.md`", (cwd / ".harness" / "agents" / "planning.md").read_text())
+
+    def test_init_project_map_creates_missing_files_without_overwrite(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            project = cwd / ".harness" / "project"
+            project.mkdir(parents=True)
+            (project / "overview.md").write_text("# Custom Overview\n\nKeep this.\n")
+
+            result = self.run_cli(cwd, "init-project-map")
+
+            self.assertIn("initialized project map", result.stdout)
+            self.assertEqual("# Custom Overview\n\nKeep this.\n", (project / "overview.md").read_text())
+            self.assertTrue((project / "architecture.md").exists())
+            self.assertTrue((project / "index.md").exists())
+            self.assertIn("Current code wins", (project / "index.md").read_text())
+
+    def test_sync_project_map_requires_force(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init-project-map")
+
+            result = self.run_cli(cwd, "sync-project-map", check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("--force", result.stderr)
+
+    def test_sync_project_map_force_refreshes_templates_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            project = cwd / ".harness" / "project"
+            (project / "validation.md").write_text("custom\n")
+            session_dir = cwd / ".harness" / "sessions" / "req-login-timeout"
+            session_dir.mkdir(parents=True)
+            artifact = session_dir / "artifact.md"
+            artifact.write_text("session artifact\n")
+
+            result = self.run_cli(cwd, "sync-project-map", "--force")
+
+            self.assertIn("synced project map", result.stdout)
+            self.assertIn("Build Commands", (project / "validation.md").read_text())
+            self.assertEqual("session artifact\n", artifact.read_text())
 
     def test_missing_linear_token_blocks_only_sync(self):
         with tempfile.TemporaryDirectory() as tmp:

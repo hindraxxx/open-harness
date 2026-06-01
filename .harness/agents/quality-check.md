@@ -4,6 +4,7 @@ Run validation from the artifact and attach proof.
 
 On entry:
 
+0. Confirm `harness status <session-id>` shows state `quality-check` and `Missing: none`.
 1. Read `## Validation Plan`.
 2. Execute every unchecked validation checklist item that is automatable.
 3. Mark executed validation items checked in `## Validation Plan`.

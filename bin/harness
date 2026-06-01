@@ -43,6 +43,10 @@ def agents_dir() -> Path:
     return harness_dir() / "agents"
 
 
+def project_map_dir() -> Path:
+    return harness_dir() / "project"
+
+
 def template_path() -> Path:
     return harness_dir() / "templates" / "session.md"
 
@@ -197,6 +201,115 @@ TBD
 """
 
 
+def default_project_map() -> dict[str, str]:
+    return {
+        "overview.md": """# Project Overview
+
+## Purpose
+TBD
+
+## Main User Workflows
+- TBD
+
+## Main Domains
+- TBD
+
+## Entry Points
+- TBD
+
+## Current Code Wins
+This map is orientation only. Verify against current repo before planning or editing.
+""",
+        "architecture.md": """# Architecture Map
+
+## Detected Architecture
+TBD
+
+## Runtime / Frameworks
+- TBD
+
+## Main Layers
+- TBD
+
+## Request / Data Flow
+- TBD
+
+## External Integrations
+- TBD
+
+## Generated or Do-Not-Edit Areas
+- TBD
+""",
+        "conventions.md": """# Project Conventions
+
+## Naming
+- TBD
+
+## File Placement
+- TBD
+
+## Existing Patterns To Reuse
+- TBD
+
+## Anti-Patterns / Avoid
+- TBD
+""",
+        "validation.md": """# Validation Map
+
+## Build Commands
+- TBD
+
+## Test Commands
+- TBD
+
+## Lint / Static Checks
+- TBD
+
+## Browser / UI Validation
+- TBD
+
+## Proof Expectations
+- TBD
+""",
+        "risks.md": """# Project Risks
+
+## Auth / Permissions
+- TBD
+
+## Environment Requirements
+- TBD
+
+## Flaky or Slow Checks
+- TBD
+
+## High-Risk Areas
+- TBD
+""",
+        "index.md": """# Project Map Index
+
+Read order:
+1. overview.md
+2. architecture.md
+3. conventions.md
+4. validation.md
+5. risks.md
+
+Rule: this map is orientation, not authority. Current code wins.
+""",
+    }
+
+
+def write_project_map(overwrite: bool = False) -> list[Path]:
+    written = []
+    project_map_dir().mkdir(parents=True, exist_ok=True)
+    for name, content in default_project_map().items():
+        path = project_map_dir() / name
+        if overwrite or not path.exists() or not path.read_text().strip():
+            path.write_text(content)
+            written.append(path)
+    return written
+
+
 def default_agents() -> dict[str, str]:
     return {
         "common.md": """# Common Harness Agent Guardrails
@@ -206,8 +319,9 @@ Before doing harness work:
 1. Identify the session id.
 2. Run `harness status <session-id>`.
 3. Read this file.
-4. Read the state guardrail printed by status.
-5. Before editing product code, run `harness preflight-edit <session-id>`.
+4. Read `.harness/project/index.md` for project orientation when present.
+5. Read the state guardrail printed by status.
+6. Before editing product code, run `harness preflight-edit <session-id>`.
 
 ## Hard Rules
 
@@ -220,6 +334,8 @@ Before doing harness work:
 - Never write `.env` secrets into artifacts, logs, comments, or proof files.
 - Do not fill review, quality-check, proof, or final approval sections before their state.
 - Run `harness validate <session-id>` before every transition.
+- Treat `.harness/project/` as orientation only. Verify relevant facts against current code before using them.
+- If a project-map section is stale or missing during planning, update that section before filling the session artifact.
 
 ## Gate Order
 
@@ -268,7 +384,9 @@ Explore first. Ask blocking ambiguity questions. Write acceptance criteria, vali
 Allowed:
 
 - read/search files
+- read `.harness/project/index.md` and the listed project-map files
 - inspect existing behavior
+- update stale or missing `.harness/project/` sections discovered during exploration
 - write artifact planning sections in `.harness/sessions/<session-id>/artifact.md`
 - ask user questions
 
@@ -290,6 +408,13 @@ harness transition <session-id> implementation
 `harness validate <session-id>` must show no missing planning fields before asking for human approval.
 
 Agents must not run `approve-planning` unless the user explicitly instructs them to approve planning.
+
+Before filling the session artifact:
+
+1. Read `.harness/project/index.md` if present.
+2. Verify relevant project-map facts by repo search or file inspection.
+3. Update stale or missing project-map sections with verified facts.
+4. Then fill `## Requirement Summary`, `## Acceptance Criteria`, `## Validation Plan`, and `## Implementation Checklist`.
 
 Planning must include real checklist items in:
 
@@ -410,13 +535,16 @@ For harness work, these rules are mandatory.
 1. Identify the session id from the user request or current artifact.
 2. Run `harness status <session-id>`.
 3. Read `.harness/agents/common.md`.
-4. Read the state-specific guardrail file printed by `harness status`.
-5. Follow the state guardrails strictly.
-6. Before editing product code, run `harness preflight-edit <session-id>`.
-7. Edit product code only when preflight exits 0.
-8. Use `harness transition` for phase changes.
-9. Never bypass transition guards by editing artifact status manually.
-10. Never write `.env` secrets into artifacts, logs, comments, or proof files.
+4. Read `.harness/project/index.md` if present.
+5. Read the state-specific guardrail file printed by `harness status`.
+6. Follow the state guardrails strictly.
+7. Before editing product code, run `harness preflight-edit <session-id>`.
+8. Edit product code only when preflight exits 0.
+9. Use `harness transition` for phase changes.
+10. Never bypass transition guards by editing artifact status manually.
+11. Never write `.env` secrets into artifacts, logs, comments, or proof files.
+
+Project map rule: `.harness/project/` is orientation only. Current code wins; verify relevant facts before planning or editing.
 
 If the artifact status is `start`, `planning`, `review`, `quality-check`, or `done`, product code edits are forbidden.
 
@@ -948,8 +1076,29 @@ def cmd_init(_args: argparse.Namespace) -> None:
     write_new(root() / "AGENTS.md", default_agents_bootstrap())
     for name, content in default_agents().items():
         write_new(agents_dir() / name, content)
+    write_project_map(overwrite=False)
     ensure_gitignore()
     print("initialized harness")
+
+
+def print_project_map_result(message: str, written: list[Path]) -> None:
+    print(message)
+    for path in written:
+        print(f"- {path.relative_to(root())}")
+
+
+def cmd_init_project_map(_args: argparse.Namespace) -> None:
+    written = write_project_map(overwrite=False)
+    if written:
+        print_project_map_result("initialized project map", written)
+    else:
+        print("project map already initialized")
+
+
+def cmd_sync_project_map(args: argparse.Namespace) -> None:
+    if not args.force:
+        die("sync-project-map overwrites .harness/project/*.md templates; rerun with --force")
+    print_project_map_result("synced project map", write_project_map(overwrite=True))
 
 
 def print_synced_guardrails(written: list[Path]) -> None:
@@ -1225,6 +1374,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     init_p = sub.add_parser("init")
     init_p.set_defaults(func=cmd_init)
+
+    init_project_map_p = sub.add_parser("init-project-map")
+    init_project_map_p.set_defaults(func=cmd_init_project_map)
+
+    sync_project_map_p = sub.add_parser("sync-project-map")
+    sync_project_map_p.add_argument("--force", action="store_true")
+    sync_project_map_p.set_defaults(func=cmd_sync_project_map)
 
     upgrade_p = sub.add_parser("upgrade-guardrails")
     upgrade_p.set_defaults(func=cmd_upgrade_guardrails)

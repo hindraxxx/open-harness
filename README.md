@@ -212,6 +212,36 @@ Legacy alias:
 harness upgrade-guardrails
 ```
 
+## Project Map
+
+Project maps give agents a compact repo orientation before planning. They are not authority; current code always wins and agents must verify relevant facts by repo search.
+
+Create missing map files:
+
+```bash
+harness init-project-map
+```
+
+This creates:
+
+```text
+.harness/project/
+  overview.md
+  architecture.md
+  conventions.md
+  validation.md
+  risks.md
+  index.md
+```
+
+Refresh the bundled project-map templates:
+
+```bash
+harness sync-project-map --force
+```
+
+This overwrites `.harness/project/*.md` templates only. It does not touch session artifacts under `.harness/sessions/`.
+
 ## Agent Flow
 
 Tell an agent the session id. The agent should:
@@ -219,9 +249,10 @@ Tell an agent the session id. The agent should:
 1. Read `AGENTS.md`.
 2. Run `bin/harness status <session-id>`.
 3. Read `.harness/agents/common.md`.
-4. Read the state guardrail printed by status.
-5. Run `bin/harness preflight-edit <session-id>` before product code edits.
-6. Work within that state only.
+4. Read `.harness/project/index.md` when present.
+5. Read the state guardrail printed by status.
+6. Run `bin/harness preflight-edit <session-id>` before product code edits.
+7. Work within that state only.
 
 ## Test
 

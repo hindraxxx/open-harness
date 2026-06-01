@@ -462,9 +462,34 @@ State-specific intent:
 
 These instructions guide agent behavior. They do not replace CLI validation.
 
+## Project Map Orientation
+
+Add a compact repo-specific project map under `.harness/project/`:
+
+- `overview.md`
+- `architecture.md`
+- `conventions.md`
+- `validation.md`
+- `risks.md`
+- `index.md`
+
+CLI commands:
+
+- `harness init-project-map`: creates missing project-map files without overwriting existing non-empty files.
+- `harness sync-project-map --force`: refreshes bundled project-map templates under `.harness/project/` without touching session artifacts.
+
+Project-map rules:
+
+- The map helps agents start faster.
+- The current repo code remains the source of truth.
+- During planning, agents must read `.harness/project/index.md`, verify relevant facts by repo search or file inspection, update stale or missing map sections, then fill the session artifact.
+
 ## Test Plan
 
 - `harness init` creates `.harness/`, templates, agent guardrails, `AGENTS.md`, `.env.example`, and `.gitignore` rule.
+- `harness init` creates `.harness/project/index.md` and the default compact project-map files.
+- `harness init-project-map` creates missing project-map files without overwriting existing non-empty files.
+- `harness sync-project-map --force` refreshes `.harness/project/*.md` templates without touching `.harness/sessions/`.
 - `harness start req-login-timeout --linear WF-123` creates a local session folder without putting secrets in the path.
 - `harness start req-login-timeout --create-linear --title "Login timeout"` creates a Linear issue and stores the returned issue key/URL.
 - `harness status req-login-timeout` prints the current state, artifact path, common guardrail path, and state guardrail path.
@@ -480,6 +505,7 @@ These instructions guide agent behavior. They do not replace CLI validation.
 - `harness transition req-login-timeout planning` auto-syncs the Linear issue to `Planning` when Linear is configured.
 - `harness validate req-login-timeout` fails in `quality-check` until the validation plan is executed and proof/results are recorded.
 - `harness attach-proof req-login-timeout <file>` copies proof into the session `proof/` directory and records the checked link under `## Quality Check > Proof`.
+- Planning guardrails require reading `.harness/project/index.md`, verifying map facts against the repo, and updating stale or missing map sections before writing acceptance criteria.
 - Missing `.env` allows local-only operation.
 - Missing `LINEAR_API_KEY` blocks only Linear sync.
 - Invalid transitions fail with actionable missing checklist fields.
