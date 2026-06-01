@@ -109,6 +109,34 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn('planning_approved: "true"', artifact.read_text())
             self.assertIn('planning_approved_hash: "', artifact.read_text())
 
+    def test_planning_status_reports_missing_planning_sections(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            self.run_cli(cwd, "start", "req-login-timeout")
+            self.run_cli(cwd, "transition", "req-login-timeout", "planning")
+
+            result = self.run_cli(cwd, "validate", "req-login-timeout", check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Requirement Summary must be filled", result.stdout)
+            self.assertIn("Acceptance Criteria must be filled", result.stdout)
+            self.assertIn("Validation Plan must be filled", result.stdout)
+            self.assertIn("Implementation Checklist must be filled", result.stdout)
+
+    def test_approve_planning_blocks_when_artifact_not_filled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            self.run_cli(cwd, "start", "req-login-timeout")
+            self.run_cli(cwd, "transition", "req-login-timeout", "planning")
+
+            result = self.run_cli(cwd, "approve-planning", "req-login-timeout", "--by", "Liem", check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("planning approval blocked", result.stdout)
+            self.assertIn("Implementation Checklist must be filled", result.stdout)
+
     def test_planning_changes_after_approval_block_preflight(self):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)

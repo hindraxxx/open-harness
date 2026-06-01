@@ -259,7 +259,7 @@ Allowed:
 
 - read/search files
 - inspect existing behavior
-- write artifact planning sections
+- write artifact planning sections in `.harness/sessions/<session-id>/artifact.md`
 - ask user questions
 
 Forbidden:
@@ -272,9 +272,12 @@ Forbidden:
 Exit only after human approval:
 
 ```bash
+harness validate <session-id>
 harness approve-planning <session-id> --by <human-name>
 harness transition <session-id> implementation
 ```
+
+`harness validate <session-id>` must show no missing planning fields before asking for human approval.
 
 Agents must not run `approve-planning` unless the user explicitly instructs them to approve planning.
 """,
@@ -510,8 +513,12 @@ def has_real_content(value: str) -> bool:
     cleaned = value.strip()
     if not cleaned:
         return False
-    placeholders = {"TBD", "- [ ] TBD", "- [x] TBD"}
-    return cleaned not in placeholders
+    if cleaned == "TBD":
+        return False
+    lines = [line.strip() for line in cleaned.splitlines() if line.strip()]
+    if lines and all(re.match(r"^-+\s*\[[ xX]\]\s*TBD$", line) for line in lines):
+        return False
+    return True
 
 
 def has_checked_item(value: str) -> bool:
@@ -571,13 +578,19 @@ def validate_requirements(
     check_state = target or state
     missing = []
 
-    if check_state in {"implementation", "review", "quality-check", "done"}:
+    if check_state in {"planning", "implementation", "review", "quality-check", "done"}:
         if not has_real_content(section(text, "Acceptance Criteria")):
             missing.append("Acceptance Criteria must be filled")
         if not has_real_content(section(text, "Validation Plan")):
             missing.append("Validation Plan must be filled")
         if not has_real_content(section(text, "Implementation Checklist")):
             missing.append("Implementation Checklist must be filled")
+
+    if check_state == "planning":
+        if not has_real_content(section(text, "Requirement Summary")):
+            missing.append("Requirement Summary must be filled")
+
+    if check_state in {"implementation", "review", "quality-check", "done"}:
         data, _ = parse_frontmatter(text)
         if data.get("planning_approved") != "true":
             missing.append("Planning must be human-approved with `harness approve-planning <session-id> --by <name>`")
@@ -989,11 +1002,14 @@ def cmd_transition(args: argparse.Namespace) -> None:
     state = current_state(args.session_id)
     if args.state not in TRANSITIONS[state]:
         die(f"invalid transition: {state} -> {args.state}")
-    missing = validate_requirements(
-        args.session_id,
-        args.state,
-        require_quality_execution=args.state != "quality-check",
-    )
+    if state == "start" and args.state == "planning":
+        missing = []
+    else:
+        missing = validate_requirements(
+            args.session_id,
+            args.state,
+            require_quality_execution=args.state != "quality-check",
+        )
     if missing:
         print("transition blocked")
         for item in missing:

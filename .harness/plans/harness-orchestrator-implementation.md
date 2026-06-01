@@ -280,6 +280,13 @@ Agents must not run this command unless the user explicitly approves the plan.
 
 If any approved planning section changes after approval, implementation/edit gates must block until planning is approved again.
 
+Planning approval must block unless the artifact has non-placeholder content in:
+
+- `Requirement Summary`
+- `Acceptance Criteria`
+- `Validation Plan`
+- `Implementation Checklist`
+
 ### `harness approve-review <session-id> --by <name>`
 
 Records explicit human review approval in artifact metadata and the `Human Review` section when needed.
