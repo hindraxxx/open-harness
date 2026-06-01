@@ -3,10 +3,13 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 import os
 import re
 import shutil
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 
@@ -382,6 +385,77 @@ def load_env() -> dict[str, str]:
     return values
 
 
+def linear_api_url() -> str:
+    return os.environ.get("HARNESS_LINEAR_API_URL", "https://api.linear.app/graphql")
+
+
+def linear_graphql(env: dict[str, str], query: str, variables: dict) -> dict:
+    token = env.get("LINEAR_API_KEY")
+    if not token:
+        die("missing LINEAR_API_KEY in project .env, global ~/.config/harness/.env, or environment")
+    payload = json.dumps({"query": query, "variables": variables}).encode("utf-8")
+    request = urllib.request.Request(
+        linear_api_url(),
+        data=payload,
+        headers={
+            "Authorization": token,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            body = response.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        die(f"Linear API HTTP {exc.code}: {detail}")
+    except urllib.error.URLError as exc:
+        die(f"Linear API request failed: {exc.reason}")
+    try:
+        data = json.loads(body)
+    except json.JSONDecodeError:
+        die("Linear API returned invalid JSON")
+    if data.get("errors"):
+        die(f"Linear API error: {data['errors']}")
+    return data
+
+
+def create_linear_issue(env: dict[str, str], title: str, description: str | None) -> dict[str, str]:
+    team_id = env.get("LINEAR_TEAM_ID")
+    if not team_id:
+        die("missing LINEAR_TEAM_ID; required for --create-linear")
+    issue_input = {"teamId": team_id, "title": title}
+    if description:
+        issue_input["description"] = description
+    if env.get("LINEAR_PROJECT_ID"):
+        issue_input["projectId"] = env["LINEAR_PROJECT_ID"]
+    query = """
+mutation CreateHarnessIssue($input: IssueCreateInput!) {
+  issueCreate(input: $input) {
+    success
+    issue {
+      id
+      identifier
+      title
+      url
+    }
+  }
+}
+"""
+    data = linear_graphql(env, query, {"input": issue_input})
+    result = data.get("data", {}).get("issueCreate")
+    if not result or not result.get("success") or not result.get("issue"):
+        die("Linear issueCreate did not return a successful issue")
+    issue = result["issue"]
+    return {
+        "id": issue.get("id", ""),
+        "identifier": issue.get("identifier", ""),
+        "title": issue.get("title", ""),
+        "url": issue.get("url", ""),
+    }
+
+
 def cmd_init(_args: argparse.Namespace) -> None:
     harness_dir().mkdir(exist_ok=True)
     sessions_dir().mkdir(parents=True, exist_ok=True)
@@ -402,14 +476,23 @@ def cmd_start(args: argparse.Namespace) -> None:
         die("session id must use letters, numbers, dot, underscore, or dash")
     if artifact_path(args.session_id).exists():
         die(f"session already exists: {args.session_id}")
+    if args.linear and args.create_linear:
+        die("use either --linear or --create-linear, not both")
     if not template_path().exists():
         cmd_init(argparse.Namespace())
+    linear_issue_key = args.linear or ""
+    linear_issue_url = args.linear_url or ""
+    if args.create_linear:
+        title = args.title or args.session_id.replace("-", " ").replace("_", " ").strip().title()
+        issue = create_linear_issue(load_env(), title, args.description)
+        linear_issue_key = issue["identifier"]
+        linear_issue_url = issue["url"]
     created = now()
     content = read_text(template_path())
     replacements = {
         "{{SESSION_ID}}": args.session_id,
-        "{{LINEAR_ISSUE_KEY}}": args.linear or "",
-        "{{LINEAR_ISSUE_URL}}": args.linear_url or "",
+        "{{LINEAR_ISSUE_KEY}}": linear_issue_key,
+        "{{LINEAR_ISSUE_URL}}": linear_issue_url,
         "{{CREATED_AT}}": created,
         "{{UPDATED_AT}}": created,
     }
@@ -418,6 +501,10 @@ def cmd_start(args: argparse.Namespace) -> None:
     proof_dir(args.session_id).mkdir(parents=True, exist_ok=True)
     artifact_path(args.session_id).write_text(content)
     print(f"created session: {args.session_id}")
+    if linear_issue_key:
+        print(f"linear issue: {linear_issue_key}")
+    if linear_issue_url:
+        print(f"linear url: {linear_issue_url}")
     print(f"artifact: {artifact_path(args.session_id)}")
     print(f"proof: {proof_dir(args.session_id)}")
 
@@ -512,6 +599,9 @@ def build_parser() -> argparse.ArgumentParser:
     start_p.add_argument("session_id")
     start_p.add_argument("--linear")
     start_p.add_argument("--linear-url")
+    start_p.add_argument("--create-linear", action="store_true")
+    start_p.add_argument("--title")
+    start_p.add_argument("--description")
     start_p.set_defaults(func=cmd_start)
 
     status_p = sub.add_parser("status")

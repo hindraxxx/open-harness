@@ -87,6 +87,34 @@ Create a session:
 bin/harness start req-login-timeout --linear WF-123
 ```
 
+Or create the Linear issue automatically:
+
+```bash
+bin/harness start req-login-timeout --create-linear --title "Login timeout requirement"
+```
+
+`--create-linear` requires:
+
+```env
+LINEAR_API_KEY=lin_api_xxx
+LINEAR_TEAM_ID=<team uuid>
+```
+
+Optional:
+
+```env
+LINEAR_PROJECT_ID=<project uuid>
+```
+
+You can add a description:
+
+```bash
+bin/harness start req-login-timeout \
+  --create-linear \
+  --title "Login timeout requirement" \
+  --description "Harness planning session for login timeout behavior."
+```
+
 Check status and guardrails:
 
 ```bash
@@ -118,7 +146,9 @@ Sync Linear:
 bin/harness sync-linear req-login-timeout
 ```
 
-Linear sync is currently a safe local stub: it validates global/project/env Linear config and records a sync note in the artifact. Real API calls can be added after the local flow is stable.
+`harness start --create-linear` creates a real Linear issue through the GraphQL API.
+
+`harness sync-linear` is currently a safe local stub: it validates global/project/env Linear config and records a sync note in the artifact. Real state/comment sync can be added after the local flow is stable.
 
 ## Agent Flow
 

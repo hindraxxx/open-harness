@@ -1,7 +1,9 @@
 import os
 import subprocess
 import tempfile
+import threading
 import unittest
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Optional
 
@@ -73,10 +75,11 @@ class HarnessCliTest(unittest.TestCase):
     def test_missing_linear_token_blocks_only_sync(self):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)
-            self.run_cli(cwd, "init")
-            self.run_cli(cwd, "start", "req-login-timeout", "--linear", "WF-123")
+            env = {"HARNESS_GLOBAL_ENV": str(Path(tmp) / "missing.env")}
+            self.run_cli(cwd, "init", env=env)
+            self.run_cli(cwd, "start", "req-login-timeout", "--linear", "WF-123", env=env)
 
-            result = self.run_cli(cwd, "sync-linear", "req-login-timeout", check=False)
+            result = self.run_cli(cwd, "sync-linear", "req-login-timeout", check=False, env=env)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("missing LINEAR_API_KEY", result.stderr)
             artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
@@ -111,6 +114,82 @@ class HarnessCliTest(unittest.TestCase):
             result = self.run_cli(cwd, "sync-linear", "req-login-timeout", env=env)
 
             self.assertIn("linear sync stubbed for WF-123", result.stdout)
+
+    def test_start_can_create_linear_issue(self):
+        requests = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                length = int(self.headers["Content-Length"])
+                requests.append((self.headers, self.rfile.read(length).decode("utf-8")))
+                response = {
+                    "data": {
+                        "issueCreate": {
+                            "success": True,
+                            "issue": {
+                                "id": "issue-id",
+                                "identifier": "WF-999",
+                                "title": "Login Timeout",
+                                "url": "https://linear.app/example/issue/WF-999/login-timeout",
+                            },
+                        }
+                    }
+                }
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(__import__("json").dumps(response).encode("utf-8"))
+
+            def log_message(self, _format, *args):
+                return
+
+        server = HTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                cwd = Path(tmp)
+                env = {
+                    "HARNESS_LINEAR_API_URL": f"http://127.0.0.1:{server.server_port}/graphql",
+                    "HARNESS_GLOBAL_ENV": str(Path(tmp) / "missing.env"),
+                    "LINEAR_API_KEY": "test-token",
+                    "LINEAR_TEAM_ID": "team-id",
+                    "LINEAR_PROJECT_ID": "project-id",
+                }
+                self.run_cli(cwd, "init", env=env)
+                result = self.run_cli(
+                    cwd,
+                    "start",
+                    "req-login-timeout",
+                    "--create-linear",
+                    "--title",
+                    "Login Timeout",
+                    "--description",
+                    "Harness session",
+                    env=env,
+                )
+
+                self.assertIn("linear issue: WF-999", result.stdout)
+                artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
+                text = artifact.read_text()
+                self.assertIn('linear_issue_key: "WF-999"', text)
+                self.assertIn('linear_issue_url: "https://linear.app/example/issue/WF-999/login-timeout"', text)
+                self.assertEqual(requests[0][0]["Authorization"], "test-token")
+                self.assertIn('"projectId": "project-id"', requests[0][1])
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_create_linear_requires_team_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            env = {"LINEAR_API_KEY": "test-token", "HARNESS_GLOBAL_ENV": str(Path(tmp) / "missing.env")}
+            self.run_cli(cwd, "init", env=env)
+            result = self.run_cli(cwd, "start", "req-login-timeout", "--create-linear", check=False, env=env)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("missing LINEAR_TEAM_ID", result.stderr)
 
     def test_attach_proof_records_link(self):
         with tempfile.TemporaryDirectory() as tmp:

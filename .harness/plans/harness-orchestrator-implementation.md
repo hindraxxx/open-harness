@@ -191,6 +191,23 @@ Creates:
 
 The `--linear` value records `linear_issue_key` in artifact metadata. It is not used as the folder name.
 
+### `harness start <session-id> --create-linear`
+
+Creates a Linear issue, then creates the local harness session linked to the returned Linear issue identifier and URL.
+
+Requires:
+
+- `LINEAR_API_KEY`
+- `LINEAR_TEAM_ID`
+
+Optional:
+
+- `LINEAR_PROJECT_ID`
+- `--title`
+- `--description`
+
+If `--title` is omitted, derive a readable title from `<session-id>`.
+
 ### `harness status <session-id>`
 
 Prints:
@@ -310,6 +327,7 @@ Behavior:
 - Missing project `.env` allows local-only operation.
 - Missing `LINEAR_API_KEY` across all config sources blocks only Linear sync.
 - Linear issue key is stored in artifact metadata.
+- `harness start --create-linear` creates the Linear issue through GraphQL `issueCreate`.
 - Linear comments summarize transitions and proof, but do not duplicate the full artifact.
 - Linear sync failure must report the error and leave the local artifact intact.
 
@@ -374,6 +392,7 @@ These instructions guide agent behavior. They do not replace CLI validation.
 
 - `harness init` creates `.harness/`, templates, agent guardrails, `AGENTS.md`, `.env.example`, and `.gitignore` rule.
 - `harness start req-login-timeout --linear WF-123` creates a local session folder without putting secrets in the path.
+- `harness start req-login-timeout --create-linear --title "Login timeout"` creates a Linear issue and stores the returned issue key/URL.
 - `harness status req-login-timeout` prints the current state, artifact path, common guardrail path, and state guardrail path.
 - Missing `.env` allows local-only operation.
 - Missing `LINEAR_API_KEY` blocks only Linear sync.
