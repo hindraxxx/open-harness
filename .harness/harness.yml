@@ -1,0 +1,13 @@
+version: 1
+artifact: artifact.md
+proof_dir: proof
+states:
+  - start
+  - planning
+  - implementation
+  - review
+  - needs-fix
+  - quality-check
+  - done
+initial_state: start
+

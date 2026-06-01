@@ -1,0 +1,530 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import os
+import re
+import shutil
+import sys
+from pathlib import Path
+
+
+STATES = ["start", "planning", "implementation", "review", "needs-fix", "quality-check", "done"]
+TRANSITIONS = {
+    "start": {"planning"},
+    "planning": {"implementation"},
+    "implementation": {"review"},
+    "review": {"quality-check", "needs-fix"},
+    "needs-fix": {"implementation"},
+    "quality-check": {"done", "needs-fix"},
+    "done": set(),
+}
+
+
+def root() -> Path:
+    return Path.cwd()
+
+
+def harness_dir() -> Path:
+    return root() / ".harness"
+
+
+def sessions_dir() -> Path:
+    return harness_dir() / "sessions"
+
+
+def agents_dir() -> Path:
+    return harness_dir() / "agents"
+
+
+def template_path() -> Path:
+    return harness_dir() / "templates" / "session.md"
+
+
+def artifact_path(session_id: str) -> Path:
+    return sessions_dir() / session_id / "artifact.md"
+
+
+def proof_dir(session_id: str) -> Path:
+    return sessions_dir() / session_id / "proof"
+
+
+def now() -> str:
+    return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
+
+
+def die(message: str, code: int = 1) -> None:
+    print(f"error: {message}", file=sys.stderr)
+    raise SystemExit(code)
+
+
+def read_text(path: Path) -> str:
+    try:
+        return path.read_text()
+    except FileNotFoundError:
+        die(f"missing file: {path}")
+
+
+def write_new(path: Path, content: str) -> bool:
+    if path.exists():
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
+    return True
+
+
+def ensure_gitignore() -> None:
+    path = root() / ".gitignore"
+    if path.exists():
+        lines = path.read_text().splitlines()
+        if ".env" not in lines:
+            with path.open("a") as fh:
+                if lines and lines[-1] != "":
+                    fh.write("\n")
+                fh.write(".env\n")
+    else:
+        path.write_text(".env\n")
+
+
+def default_config() -> str:
+    return """version: 1
+artifact: artifact.md
+proof_dir: proof
+states:
+  - start
+  - planning
+  - implementation
+  - review
+  - needs-fix
+  - quality-check
+  - done
+initial_state: start
+"""
+
+
+def default_env_example() -> str:
+    return "LINEAR_API_KEY=\nLINEAR_TEAM_ID=\nLINEAR_PROJECT_ID=\n"
+
+
+def default_template() -> str:
+    return """---
+session_id: "{{SESSION_ID}}"
+status: "start"
+linear_issue_key: "{{LINEAR_ISSUE_KEY}}"
+linear_issue_url: "{{LINEAR_ISSUE_URL}}"
+created_at: "{{CREATED_AT}}"
+updated_at: "{{UPDATED_AT}}"
+---
+
+# Harness Session: {{SESSION_ID}}
+
+## Requirement Summary
+
+TBD
+
+## Acceptance Criteria
+
+- [ ] TBD
+
+## Validation Plan
+
+- [ ] TBD
+
+## Implementation Checklist
+
+- [ ] TBD
+
+## Review
+
+### AI Review
+
+TBD
+
+### Human Review
+
+TBD
+
+### Required Fixes
+
+- [ ] TBD
+
+## Quality Check
+
+### Commands Run
+
+TBD
+
+### Proof
+
+- [ ] TBD
+
+### Manual Validation
+
+TBD
+
+## Final Approval
+
+TBD
+
+## Notes
+
+TBD
+"""
+
+
+def default_agents() -> dict[str, str]:
+    return {
+        "common.md": """# Common Harness Agent Guardrails
+
+Before doing harness work, run `bin/harness status <session-id>`, read this file, then read the state guardrail printed by status.
+
+Always treat the session artifact as canonical. Use `bin/harness transition` for phase changes. Keep proof under the session proof directory.
+
+Never bypass CLI transition guards by editing artifact status manually. Never write `.env` secrets into artifacts, logs, comments, or proof files.
+""",
+        "start.md": """# Start State Guardrails
+
+Initialize the harness session. Do not implement code. Exit when the artifact and proof directory exist.
+""",
+        "planning.md": """# Planning State Guardrails
+
+Explore first. Ask blocking ambiguity questions. Write acceptance criteria, validation plan, and implementation checklist. Do not implement code.
+""",
+        "implementation.md": """# Implementation State Guardrails
+
+Implement approved artifact checklist items and tests. Do not perform final quality proof or mark review complete.
+""",
+        "review.md": """# Review State Guardrails
+
+Run AI review, record human review, and convert required findings into checklist items. Fixes go back to implementation.
+""",
+        "quality-check.md": """# Quality Check State Guardrails
+
+Run validation from the artifact and attach proof. Failed validation goes back to needs-fix. Manual auth blockers require human proof notes.
+""",
+        "done.md": """# Done State Guardrails
+
+Verify final artifact completeness, proof links, final approval, and Linear sync result. Do not add new scope.
+""",
+    }
+
+
+def default_agents_bootstrap() -> str:
+    return """# Harness Agent Bootstrap
+
+For harness work:
+
+1. Identify the session id from the user request or current artifact.
+2. Run `bin/harness status <session-id>`.
+3. Read `.harness/agents/common.md`.
+4. Read the state-specific guardrail file printed by `harness status`.
+5. Follow the state guardrails strictly.
+6. Use `bin/harness transition` for phase changes.
+7. Never bypass transition guards by editing artifact status manually.
+8. Never write `.env` secrets into artifacts, logs, comments, or proof files.
+"""
+
+
+def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
+    if not text.startswith("---\n"):
+        return {}, text
+    end = text.find("\n---\n", 4)
+    if end == -1:
+        return {}, text
+    raw = text[4:end]
+    body = text[end + 5 :]
+    data = {}
+    for line in raw.splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        data[key.strip()] = value.strip().strip('"')
+    return data, body
+
+
+def dump_frontmatter(data: dict[str, str], body: str) -> str:
+    keys = ["session_id", "status", "linear_issue_key", "linear_issue_url", "created_at", "updated_at", "linear_sync"]
+    lines = ["---"]
+    for key in keys:
+        if key in data:
+            value = data[key].replace('"', '\\"')
+            lines.append(f'{key}: "{value}"')
+    for key in sorted(k for k in data if k not in keys):
+        value = data[key].replace('"', '\\"')
+        lines.append(f'{key}: "{value}"')
+    lines.append("---")
+    return "\n".join(lines) + "\n" + body.lstrip("\n")
+
+
+def update_artifact_meta(session_id: str, updates: dict[str, str]) -> None:
+    path = artifact_path(session_id)
+    data, body = parse_frontmatter(read_text(path))
+    data.update(updates)
+    data["updated_at"] = now()
+    path.write_text(dump_frontmatter(data, body))
+
+
+def artifact_meta(session_id: str) -> dict[str, str]:
+    data, _ = parse_frontmatter(read_text(artifact_path(session_id)))
+    return data
+
+
+def current_state(session_id: str) -> str:
+    state = artifact_meta(session_id).get("status", "")
+    if state not in STATES:
+        die(f"invalid or missing status in {artifact_path(session_id)}")
+    return state
+
+
+def section(text: str, heading: str) -> str:
+    pattern = re.compile(rf"^## {re.escape(heading)}\s*$", re.MULTILINE)
+    match = pattern.search(text)
+    if not match:
+        return ""
+    next_match = re.search(r"^## ", text[match.end() :], re.MULTILINE)
+    if not next_match:
+        return text[match.end() :].strip()
+    return text[match.end() : match.end() + next_match.start()].strip()
+
+
+def subsection(text: str, heading: str) -> str:
+    pattern = re.compile(rf"^### {re.escape(heading)}\s*$", re.MULTILINE)
+    match = pattern.search(text)
+    if not match:
+        return ""
+    next_match = re.search(r"^### |^## ", text[match.end() :], re.MULTILINE)
+    if not next_match:
+        return text[match.end() :].strip()
+    return text[match.end() : match.end() + next_match.start()].strip()
+
+
+def has_real_content(value: str) -> bool:
+    cleaned = value.strip()
+    if not cleaned:
+        return False
+    placeholders = {"TBD", "- [ ] TBD", "- [x] TBD"}
+    return cleaned not in placeholders
+
+
+def has_checked_item(value: str) -> bool:
+    return bool(re.search(r"^- \[[xX]\] .+", value, re.MULTILINE))
+
+
+def validate_requirements(session_id: str, target: str | None = None) -> list[str]:
+    path = artifact_path(session_id)
+    text = read_text(path)
+    state = current_state(session_id)
+    check_state = target or state
+    missing = []
+
+    if check_state in {"implementation", "review", "quality-check", "done"}:
+        if not has_real_content(section(text, "Acceptance Criteria")):
+            missing.append("Acceptance Criteria must be filled")
+        if not has_real_content(section(text, "Validation Plan")):
+            missing.append("Validation Plan must be filled")
+        if not has_real_content(section(text, "Implementation Checklist")):
+            missing.append("Implementation Checklist must be filled")
+
+    if check_state in {"review", "quality-check", "done"}:
+        if not has_checked_item(section(text, "Implementation Checklist")):
+            missing.append("Implementation Checklist needs at least one checked item")
+
+    if check_state in {"quality-check", "done"}:
+        review = section(text, "Review")
+        if not has_real_content(subsection(review, "AI Review")):
+            missing.append("AI Review must be recorded")
+        if not has_real_content(subsection(review, "Human Review")):
+            missing.append("Human Review must be recorded")
+
+    if check_state == "done":
+        quality = section(text, "Quality Check")
+        if not has_checked_item(subsection(quality, "Proof")):
+            missing.append("Quality Check Proof needs at least one checked item")
+        if not has_real_content(section(text, "Final Approval")):
+            missing.append("Final Approval must be recorded")
+
+    if state not in STATES:
+        missing.append(f"status must be one of: {', '.join(STATES)}")
+    return missing
+
+
+def load_env() -> dict[str, str]:
+    path = root() / ".env"
+    values = {}
+    if not path.exists():
+        return values
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key.strip()] = value.strip()
+    return values
+
+
+def cmd_init(_args: argparse.Namespace) -> None:
+    harness_dir().mkdir(exist_ok=True)
+    sessions_dir().mkdir(parents=True, exist_ok=True)
+    agents_dir().mkdir(parents=True, exist_ok=True)
+    (harness_dir() / "templates").mkdir(parents=True, exist_ok=True)
+    write_new(harness_dir() / "harness.yml", default_config())
+    write_new(template_path(), default_template())
+    write_new(root() / ".env.example", default_env_example())
+    write_new(root() / "AGENTS.md", default_agents_bootstrap())
+    for name, content in default_agents().items():
+        write_new(agents_dir() / name, content)
+    ensure_gitignore()
+    print("initialized harness")
+
+
+def cmd_start(args: argparse.Namespace) -> None:
+    if not re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]*$", args.session_id):
+        die("session id must use letters, numbers, dot, underscore, or dash")
+    if artifact_path(args.session_id).exists():
+        die(f"session already exists: {args.session_id}")
+    if not template_path().exists():
+        cmd_init(argparse.Namespace())
+    created = now()
+    content = read_text(template_path())
+    replacements = {
+        "{{SESSION_ID}}": args.session_id,
+        "{{LINEAR_ISSUE_KEY}}": args.linear or "",
+        "{{LINEAR_ISSUE_URL}}": args.linear_url or "",
+        "{{CREATED_AT}}": created,
+        "{{UPDATED_AT}}": created,
+    }
+    for old, new in replacements.items():
+        content = content.replace(old, new)
+    proof_dir(args.session_id).mkdir(parents=True, exist_ok=True)
+    artifact_path(args.session_id).write_text(content)
+    print(f"created session: {args.session_id}")
+    print(f"artifact: {artifact_path(args.session_id)}")
+    print(f"proof: {proof_dir(args.session_id)}")
+
+
+def cmd_status(args: argparse.Namespace) -> None:
+    data = artifact_meta(args.session_id)
+    state = current_state(args.session_id)
+    missing = validate_requirements(args.session_id)
+    print(f"Session: {args.session_id}")
+    print(f"State: {state}")
+    print(f"Artifact: {artifact_path(args.session_id)}")
+    print(f"Linear issue: {data.get('linear_issue_key') or 'none'}")
+    print(f"Common guardrail: {agents_dir() / 'common.md'}")
+    print(f"State guardrail: {agents_dir() / (state + '.md')}")
+    if missing:
+        print("Missing:")
+        for item in missing:
+            print(f"- {item}")
+    else:
+        print("Missing: none")
+
+
+def cmd_validate(args: argparse.Namespace) -> None:
+    target = getattr(args, "target", None)
+    missing = validate_requirements(args.session_id, target)
+    if missing:
+        print("invalid")
+        for item in missing:
+            print(f"- {item}")
+        raise SystemExit(1)
+    print("valid")
+
+
+def cmd_transition(args: argparse.Namespace) -> None:
+    if args.state not in STATES:
+        die(f"unknown state: {args.state}")
+    state = current_state(args.session_id)
+    if args.state not in TRANSITIONS[state]:
+        die(f"invalid transition: {state} -> {args.state}")
+    missing = validate_requirements(args.session_id, args.state)
+    if missing:
+        print("transition blocked")
+        for item in missing:
+            print(f"- {item}")
+        raise SystemExit(1)
+    update_artifact_meta(args.session_id, {"status": args.state})
+    print(f"transitioned: {state} -> {args.state}")
+
+
+def cmd_attach_proof(args: argparse.Namespace) -> None:
+    source = Path(args.file).expanduser()
+    if not source.exists() or not source.is_file():
+        die(f"proof file not found: {source}")
+    target_dir = proof_dir(args.session_id)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = target_dir / source.name
+    if source.resolve() != target.resolve():
+        shutil.copy2(source, target)
+    path = artifact_path(args.session_id)
+    text = read_text(path)
+    rel = target.relative_to(path.parent)
+    proof_line = f"- [x] [{target.name}]({rel})"
+    if proof_line not in text:
+        text = text.replace("### Proof\n\n- [ ] TBD", f"### Proof\n\n{proof_line}")
+        if proof_line not in text:
+            text += f"\n\n### Attached Proof\n\n{proof_line}\n"
+        path.write_text(text)
+    update_artifact_meta(args.session_id, {})
+    print(f"attached proof: {target}")
+
+
+def cmd_sync_linear(args: argparse.Namespace) -> None:
+    env = load_env()
+    if not env.get("LINEAR_API_KEY"):
+        die("missing LINEAR_API_KEY in .env; local artifact unchanged")
+    data = artifact_meta(args.session_id)
+    if not data.get("linear_issue_key"):
+        die("artifact has no linear_issue_key")
+    # Safe v0 stub: prove configuration and record local sync result.
+    update_artifact_meta(args.session_id, {"linear_sync": f"stubbed:{now()}"})
+    print(f"linear sync stubbed for {data['linear_issue_key']}")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="harness")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    init_p = sub.add_parser("init")
+    init_p.set_defaults(func=cmd_init)
+
+    start_p = sub.add_parser("start")
+    start_p.add_argument("session_id")
+    start_p.add_argument("--linear")
+    start_p.add_argument("--linear-url")
+    start_p.set_defaults(func=cmd_start)
+
+    status_p = sub.add_parser("status")
+    status_p.add_argument("session_id")
+    status_p.set_defaults(func=cmd_status)
+
+    validate_p = sub.add_parser("validate")
+    validate_p.add_argument("session_id")
+    validate_p.add_argument("--target")
+    validate_p.set_defaults(func=cmd_validate)
+
+    transition_p = sub.add_parser("transition")
+    transition_p.add_argument("session_id")
+    transition_p.add_argument("state")
+    transition_p.set_defaults(func=cmd_transition)
+
+    proof_p = sub.add_parser("attach-proof")
+    proof_p.add_argument("session_id")
+    proof_p.add_argument("file")
+    proof_p.set_defaults(func=cmd_attach_proof)
+
+    sync_p = sub.add_parser("sync-linear")
+    sync_p.add_argument("session_id")
+    sync_p.set_defaults(func=cmd_sync_linear)
+    return parser
+
+
+def main() -> None:
+    parser = build_parser()
+    args = parser.parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()
