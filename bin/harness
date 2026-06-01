@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import os
 import re
@@ -128,6 +129,7 @@ linear_issue_url: "{{LINEAR_ISSUE_URL}}"
 planning_approved: "false"
 planning_approved_by: ""
 planning_approved_at: ""
+planning_approved_hash: ""
 review_approved: "false"
 review_approved_by: ""
 review_approved_at: ""
@@ -442,6 +444,7 @@ def dump_frontmatter(data: dict[str, str], body: str) -> str:
         "planning_approved",
         "planning_approved_by",
         "planning_approved_at",
+        "planning_approved_hash",
         "review_approved",
         "review_approved_by",
         "review_approved_at",
@@ -519,6 +522,23 @@ def has_unchecked_item(value: str) -> bool:
     return bool(re.search(r"^- \[ \] .+", value, re.MULTILINE))
 
 
+def planning_snapshot(text: str) -> str:
+    parts = [
+        "Requirement Summary",
+        section(text, "Requirement Summary"),
+        "Acceptance Criteria",
+        section(text, "Acceptance Criteria"),
+        "Validation Plan",
+        section(text, "Validation Plan"),
+        "Implementation Checklist",
+        section(text, "Implementation Checklist"),
+    ]
+    normalized = "\n".join(part.strip() for part in parts)
+    normalized = re.sub(r"[ \t]+", " ", normalized)
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized).strip()
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
 def validate_requirements(
     session_id: str,
     target: str | None = None,
@@ -540,6 +560,8 @@ def validate_requirements(
         data, _ = parse_frontmatter(text)
         if data.get("planning_approved") != "true":
             missing.append("Planning must be human-approved with `harness approve-planning <session-id> --by <name>`")
+        elif data.get("planning_approved_hash") != planning_snapshot(text):
+            missing.append("Planning sections changed after approval; rerun `harness approve-planning <session-id> --by <name>`")
 
     if check_state in {"review", "quality-check", "done"}:
         if not has_checked_item(section(text, "Implementation Checklist")):
@@ -905,6 +927,7 @@ def cmd_approve_planning(args: argparse.Namespace) -> None:
             "planning_approved": "true",
             "planning_approved_by": args.by,
             "planning_approved_at": now(),
+            "planning_approved_hash": planning_snapshot(read_text(path)),
         },
     )
     print(f"planning approved by {args.by}")

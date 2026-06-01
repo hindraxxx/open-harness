@@ -264,11 +264,21 @@ Blocks edits in:
 
 Records explicit human planning approval in artifact metadata and the `Planning Approval` section.
 
+Also stores a hash of the approved planning sections:
+
+- `Requirement Summary`
+- `Acceptance Criteria`
+- `Validation Plan`
+- `Implementation Checklist`
+
 Required before:
 
 - `planning -> implementation`
+- product code edit preflight
 
 Agents must not run this command unless the user explicitly approves the plan.
+
+If any approved planning section changes after approval, implementation/edit gates must block until planning is approved again.
 
 ### `harness approve-review <session-id> --by <name>`
 
@@ -454,6 +464,7 @@ These instructions guide agent behavior. They do not replace CLI validation.
 - `harness status req-login-timeout` warns when non-harness files changed while the session is outside `implementation` or `needs-fix`.
 - `harness preflight-edit req-login-timeout` blocks product code edits before planning has completed.
 - `harness transition req-login-timeout implementation` blocks until `harness approve-planning req-login-timeout --by <name>` has been run.
+- `harness preflight-edit req-login-timeout` blocks when approved planning sections changed after approval.
 - `harness transition req-login-timeout quality-check` blocks until `harness approve-review req-login-timeout --by <name>` has been run.
 - `harness transition req-login-timeout planning` auto-syncs the Linear issue to `Planning` when Linear is configured.
 - `harness validate req-login-timeout` fails in `quality-check` until the validation plan is executed and proof/results are recorded.

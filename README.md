@@ -145,6 +145,8 @@ bin/harness transition req-login-timeout implementation
 
 `planning -> implementation` requires explicit planning approval. Agents must not run `approve-planning` unless the user explicitly approves the plan.
 
+`approve-planning` locks a hash of Requirement Summary, Acceptance Criteria, Validation Plan, and Implementation Checklist. If those sections change after approval, implementation/edit gates block until planning is approved again.
+
 After implementation, move to review and stop for human review:
 
 ```bash

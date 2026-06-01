@@ -107,6 +107,30 @@ class HarnessCliTest(unittest.TestCase):
 
             self.assertIn("transitioned: planning -> implementation", allowed.stdout)
             self.assertIn('planning_approved: "true"', artifact.read_text())
+            self.assertIn('planning_approved_hash: "', artifact.read_text())
+
+    def test_planning_changes_after_approval_block_preflight(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            self.run_cli(cwd, "start", "req-login-timeout")
+            artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
+            text = artifact.read_text()
+            text = text.replace("TBD", "Download Neraca as Excel", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Acceptance exists", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Validation exists", 1)
+            text = text.replace("- [ ] TBD", "- [x] Implementation complete", 1)
+            artifact.write_text(text)
+
+            self.run_cli(cwd, "transition", "req-login-timeout", "planning")
+            self.run_cli(cwd, "approve-planning", "req-login-timeout", "--by", "Liem")
+            self.run_cli(cwd, "transition", "req-login-timeout", "implementation")
+            artifact.write_text(artifact.read_text().replace("- [ ] Acceptance exists", "- [ ] Acceptance changed"))
+
+            blocked = self.run_cli(cwd, "preflight-edit", "req-login-timeout", check=False)
+
+            self.assertNotEqual(blocked.returncode, 0)
+            self.assertIn("Planning sections changed after approval", blocked.stdout)
 
     def test_review_to_quality_check_requires_approval(self):
         with tempfile.TemporaryDirectory() as tmp:
