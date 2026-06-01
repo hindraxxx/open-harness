@@ -86,34 +86,99 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn('status: "start"', artifact.read_text())
 
     def test_global_env_allows_linear_sync(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            cwd = Path(tmp) / "project"
-            cwd.mkdir()
-            global_env = Path(tmp) / "global.env"
-            global_env.write_text("LINEAR_API_KEY=global-token\n")
-            env = {"HARNESS_GLOBAL_ENV": str(global_env)}
+        requests = []
 
-            self.run_cli(cwd, "init", env=env)
-            self.run_cli(cwd, "start", "req-login-timeout", "--linear", "WF-123", env=env)
-            result = self.run_cli(cwd, "sync-linear", "req-login-timeout", env=env)
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                length = int(self.headers["Content-Length"])
+                body = self.rfile.read(length).decode("utf-8")
+                requests.append(body)
+                if "query HarnessIssue" in body:
+                    response = {
+                        "data": {
+                            "issue": {
+                                "id": "issue-id",
+                                "identifier": "WF-123",
+                                "title": "Login Timeout",
+                                "url": "https://linear.app/example/issue/WF-123/login-timeout",
+                                "state": {"id": "backlog-id", "name": "Backlog"},
+                                "team": {
+                                    "id": "team-id",
+                                    "states": {
+                                        "nodes": [
+                                            {"id": "backlog-id", "name": "Backlog"},
+                                            {"id": "planning-id", "name": "Planning"},
+                                        ]
+                                    },
+                                },
+                            }
+                        }
+                    }
+                else:
+                    response = {
+                        "data": {
+                            "issueUpdate": {
+                                "success": True,
+                                "issue": {
+                                    "id": "issue-id",
+                                    "identifier": "WF-123",
+                                    "state": {"id": "backlog-id", "name": "Backlog"},
+                                },
+                            }
+                        }
+                    }
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(__import__("json").dumps(response).encode("utf-8"))
 
-            self.assertIn("linear sync stubbed for WF-123", result.stdout)
-            artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
-            self.assertIn('linear_sync: "stubbed:', artifact.read_text())
+            def log_message(self, _format, *args):
+                return
+
+        server = HTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                cwd = Path(tmp) / "project"
+                cwd.mkdir()
+                global_env = Path(tmp) / "global.env"
+                global_env.write_text("LINEAR_API_KEY=global-token\n")
+                env = {
+                    "HARNESS_GLOBAL_ENV": str(global_env),
+                    "HARNESS_LINEAR_API_URL": f"http://127.0.0.1:{server.server_port}/graphql",
+                }
+
+                self.run_cli(cwd, "init", env=env)
+                self.run_cli(cwd, "start", "req-login-timeout", "--linear", "WF-123", env=env)
+                result = self.run_cli(cwd, "sync-linear", "req-login-timeout", env=env)
+
+                self.assertIn("linear synced: WF-123 -> Backlog", result.stdout)
+                artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
+                self.assertIn('linear_sync: "state:Backlog:', artifact.read_text())
+                self.assertEqual(len(requests), 2)
+        finally:
+            server.shutdown()
+            server.server_close()
 
     def test_project_env_overrides_missing_global_env(self):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp) / "project"
             cwd.mkdir()
             global_env = Path(tmp) / "missing-global.env"
-            env = {"HARNESS_GLOBAL_ENV": str(global_env)}
+            env = {
+                "HARNESS_GLOBAL_ENV": str(global_env),
+                "HARNESS_LINEAR_API_URL": "http://127.0.0.1:9/graphql",
+            }
 
             self.run_cli(cwd, "init", env=env)
             (cwd / ".env").write_text("LINEAR_API_KEY=project-token\n")
             self.run_cli(cwd, "start", "req-login-timeout", "--linear", "WF-123", env=env)
-            result = self.run_cli(cwd, "sync-linear", "req-login-timeout", env=env)
+            result = self.run_cli(cwd, "sync-linear", "req-login-timeout", check=False, env=env)
 
-            self.assertIn("linear sync stubbed for WF-123", result.stdout)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Linear API request failed", result.stderr)
 
     def test_start_can_create_linear_issue(self):
         requests = []

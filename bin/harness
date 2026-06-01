@@ -103,6 +103,14 @@ states:
   - quality-check
   - done
 initial_state: start
+linear_state_map:
+  start: Backlog
+  planning: Planning
+  implementation: In Progress
+  review: Human Review
+  needs-fix: In Progress
+  quality-check: Quality Check
+  done: Done
 """
 
 
@@ -365,6 +373,41 @@ def parse_env_file(path: Path) -> dict[str, str]:
     return values
 
 
+def load_linear_state_map() -> dict[str, str]:
+    default = {
+        "start": "Backlog",
+        "planning": "Planning",
+        "implementation": "In Progress",
+        "review": "Human Review",
+        "needs-fix": "In Progress",
+        "quality-check": "Quality Check",
+        "done": "Done",
+    }
+    path = harness_dir() / "harness.yml"
+    if not path.exists():
+        return default
+    lines = path.read_text().splitlines()
+    mapping = {}
+    in_map = False
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped == "linear_state_map:":
+            in_map = True
+            continue
+        if in_map:
+            if not line.startswith("  "):
+                break
+            if ":" not in stripped:
+                continue
+            key, value = stripped.split(":", 1)
+            value = value.strip().strip('"').strip("'")
+            if key in STATES and value:
+                mapping[key] = value
+    return {**default, **mapping}
+
+
 def global_env_path() -> Path:
     override = os.environ.get("HARNESS_GLOBAL_ENV")
     if override:
@@ -412,6 +455,8 @@ def linear_graphql(env: dict[str, str], query: str, variables: dict) -> dict:
         die(f"Linear API HTTP {exc.code}: {detail}")
     except urllib.error.URLError as exc:
         die(f"Linear API request failed: {exc.reason}")
+    except Exception as exc:
+        die(f"Linear API request failed: {exc}")
     try:
         data = json.loads(body)
     except json.JSONDecodeError:
@@ -454,6 +499,60 @@ mutation CreateHarnessIssue($input: IssueCreateInput!) {
         "title": issue.get("title", ""),
         "url": issue.get("url", ""),
     }
+
+
+def get_linear_issue(env: dict[str, str], issue_identifier: str) -> dict:
+    query = """
+query HarnessIssue($id: String!) {
+  issue(id: $id) {
+    id
+    identifier
+    title
+    url
+    state {
+      id
+      name
+    }
+    team {
+      id
+      states {
+        nodes {
+          id
+          name
+        }
+      }
+    }
+  }
+}
+"""
+    data = linear_graphql(env, query, {"id": issue_identifier})
+    issue = data.get("data", {}).get("issue")
+    if not issue:
+        die(f"Linear issue not found: {issue_identifier}")
+    return issue
+
+
+def update_linear_issue_state(env: dict[str, str], issue_id: str, state_id: str) -> dict:
+    query = """
+mutation HarnessIssueUpdate($id: String!, $input: IssueUpdateInput!) {
+  issueUpdate(id: $id, input: $input) {
+    success
+    issue {
+      id
+      identifier
+      state {
+        id
+        name
+      }
+    }
+  }
+}
+"""
+    data = linear_graphql(env, query, {"id": issue_id, "input": {"stateId": state_id}})
+    result = data.get("data", {}).get("issueUpdate")
+    if not result or not result.get("success") or not result.get("issue"):
+        die("Linear issueUpdate did not return a successful issue")
+    return result["issue"]
 
 
 def cmd_init(_args: argparse.Namespace) -> None:
@@ -581,11 +680,23 @@ def cmd_sync_linear(args: argparse.Namespace) -> None:
     if not env.get("LINEAR_API_KEY"):
         die("missing LINEAR_API_KEY in project .env, global ~/.config/harness/.env, or environment; local artifact unchanged")
     data = artifact_meta(args.session_id)
-    if not data.get("linear_issue_key"):
+    issue_key = data.get("linear_issue_key")
+    if not issue_key:
         die("artifact has no linear_issue_key")
-    # Safe v0 stub: prove configuration and record local sync result.
-    update_artifact_meta(args.session_id, {"linear_sync": f"stubbed:{now()}"})
-    print(f"linear sync stubbed for {data['linear_issue_key']}")
+    state = current_state(args.session_id)
+    state_name = load_linear_state_map().get(state)
+    if not state_name:
+        die(f"no Linear state mapping for harness state: {state}")
+    issue = get_linear_issue(env, issue_key)
+    states = issue.get("team", {}).get("states", {}).get("nodes", [])
+    state_by_name = {item.get("name"): item for item in states}
+    linear_state = state_by_name.get(state_name)
+    if not linear_state:
+        available = ", ".join(sorted(name for name in state_by_name if name))
+        die(f"Linear state '{state_name}' not found for issue team. Available: {available}")
+    updated = update_linear_issue_state(env, issue["id"], linear_state["id"])
+    update_artifact_meta(args.session_id, {"linear_sync": f"state:{updated['state']['name']}:{now()}"})
+    print(f"linear synced: {issue_key} -> {updated['state']['name']}")
 
 
 def build_parser() -> argparse.ArgumentParser:

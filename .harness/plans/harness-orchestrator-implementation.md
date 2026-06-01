@@ -328,8 +328,22 @@ Behavior:
 - Missing `LINEAR_API_KEY` across all config sources blocks only Linear sync.
 - Linear issue key is stored in artifact metadata.
 - `harness start --create-linear` creates the Linear issue through GraphQL `issueCreate`.
+- `harness sync-linear` resolves the issue, maps harness state to Linear workflow status, and updates the issue through GraphQL `issueUpdate`.
 - Linear comments summarize transitions and proof, but do not duplicate the full artifact.
 - Linear sync failure must report the error and leave the local artifact intact.
+
+Default Linear state mapping:
+
+```yaml
+linear_state_map:
+  start: Backlog
+  planning: Planning
+  implementation: In Progress
+  review: Human Review
+  needs-fix: In Progress
+  quality-check: Quality Check
+  done: Done
+```
 
 ## Agent Skill and Template Plan
 

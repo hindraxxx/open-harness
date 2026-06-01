@@ -148,7 +148,22 @@ bin/harness sync-linear req-login-timeout
 
 `harness start --create-linear` creates a real Linear issue through the GraphQL API.
 
-`harness sync-linear` is currently a safe local stub: it validates global/project/env Linear config and records a sync note in the artifact. Real state/comment sync can be added after the local flow is stable.
+`harness sync-linear` resolves the linked Linear issue, finds the mapped workflow status by name, and updates the issue state.
+
+Default Linear status mapping:
+
+```yaml
+linear_state_map:
+  start: Backlog
+  planning: Planning
+  implementation: In Progress
+  review: Human Review
+  needs-fix: In Progress
+  quality-check: Quality Check
+  done: Done
+```
+
+Edit `.harness/harness.yml` if your Linear workflow uses different status names.
 
 ## Agent Flow
 
