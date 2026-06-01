@@ -1,40 +1,17 @@
 # Start State Guardrails
 
-## Purpose
+Initialize the harness session.
 
-Initialize a harness session and prepare the artifact workspace.
+Allowed:
 
-## Allowed Actions
+- verify harness files
+- create or inspect the session artifact
+- transition to `planning`
 
-- Verify the harness CLI exists.
-- Run `bin/harness init` if the project is not initialized.
-- Run `bin/harness start <session-id> --linear <issue-key>` when a Linear issue is provided.
-- Confirm session artifact and proof directory exist.
-- Record the Linear issue key if present.
+Forbidden:
 
-## Forbidden Actions
+- product code edits
+- test code edits
+- implementation decisions
 
-- Do not implement code.
-- Do not write acceptance criteria beyond obvious metadata.
-- Do not create proof manually outside the session proof directory.
-- Do not store Linear API tokens in the artifact.
-
-## Required Artifact Updates
-
-- Session id.
-- Initial status.
-- Linked Linear issue key or explicit `none`.
-- Creation timestamp if supported by the template.
-
-## CLI Commands
-
-- `bin/harness init`
-- `bin/harness start <session-id> --linear <issue-key>`
-- `bin/harness status <session-id>`
-
-## Exit Criteria
-
-- Session artifact exists.
-- Proof directory exists.
-- `bin/harness status <session-id>` prints the next guardrail path.
-
+Before any code edit, transition to `planning`, complete planning, then transition to `implementation`.

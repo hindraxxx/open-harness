@@ -72,6 +72,29 @@ class HarnessCliTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("invalid transition", result.stderr)
 
+    def test_preflight_blocks_code_edits_before_implementation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            self.run_cli(cwd, "start", "req-login-timeout")
+
+            result = self.run_cli(cwd, "preflight-edit", "req-login-timeout", check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("product code edits blocked", result.stderr)
+
+    def test_upgrade_guardrails_overwrites_bootstrap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            (cwd / "AGENTS.md").write_text("old\n")
+
+            self.run_cli(cwd, "upgrade-guardrails")
+
+            text = (cwd / "AGENTS.md").read_text()
+            self.assertIn("preflight-edit", text)
+            self.assertIn("If preflight blocks", text)
+
     def test_missing_linear_token_blocks_only_sync(self):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)

@@ -237,6 +237,23 @@ Validates and updates local artifact status. If Linear is configured, syncs the 
 
 Checks whether the artifact satisfies the requirements for its current state or target transition.
 
+### `harness preflight-edit <session-id>`
+
+Hard gate before product code edits.
+
+Allows edits only when:
+
+- artifact status is `implementation` or `needs-fix`
+- implementation gate requirements are satisfied
+
+Blocks edits in:
+
+- `start`
+- `planning`
+- `review`
+- `quality-check`
+- `done`
+
 ### `harness attach-proof <session-id> <file>`
 
 Copies or records proof under:
@@ -408,6 +425,8 @@ These instructions guide agent behavior. They do not replace CLI validation.
 - `harness start req-login-timeout --linear WF-123` creates a local session folder without putting secrets in the path.
 - `harness start req-login-timeout --create-linear --title "Login timeout"` creates a Linear issue and stores the returned issue key/URL.
 - `harness status req-login-timeout` prints the current state, artifact path, common guardrail path, and state guardrail path.
+- `harness status req-login-timeout` warns when non-harness files changed while the session is outside `implementation` or `needs-fix`.
+- `harness preflight-edit req-login-timeout` blocks product code edits before planning has completed.
 - Missing `.env` allows local-only operation.
 - Missing `LINEAR_API_KEY` blocks only Linear sync.
 - Invalid transitions fail with actionable missing checklist fields.

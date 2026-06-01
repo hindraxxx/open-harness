@@ -127,6 +127,14 @@ Validate the current state:
 bin/harness validate req-login-timeout
 ```
 
+Before editing product code, verify the edit gate:
+
+```bash
+bin/harness preflight-edit req-login-timeout
+```
+
+This exits non-zero unless the session is in `implementation` or `needs-fix` and the implementation gate requirements are satisfied.
+
 Move state:
 
 ```bash
@@ -165,6 +173,16 @@ linear_state_map:
 
 Edit `.harness/harness.yml` if your Linear workflow uses different status names.
 
+## Upgrade Existing Project Guardrails
+
+If a project already ran `harness init`, refresh its root `AGENTS.md` and `.harness/agents/*.md` guardrails:
+
+```bash
+harness upgrade-guardrails
+```
+
+Use this after CLI upgrades. It overwrites only the agent guardrail files and root `AGENTS.md`.
+
 ## Agent Flow
 
 Tell an agent the session id. The agent should:
@@ -173,7 +191,8 @@ Tell an agent the session id. The agent should:
 2. Run `bin/harness status <session-id>`.
 3. Read `.harness/agents/common.md`.
 4. Read the state guardrail printed by status.
-5. Work within that state only.
+5. Run `bin/harness preflight-edit <session-id>` before product code edits.
+6. Work within that state only.
 
 ## Test
 

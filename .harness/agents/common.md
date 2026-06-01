@@ -1,35 +1,33 @@
 # Common Harness Agent Guardrails
 
-## Required Startup
-
 Before doing harness work:
 
 1. Identify the session id.
-2. Run `bin/harness status <session-id>`.
+2. Run `harness status <session-id>`.
 3. Read this file.
-4. Read the state guardrail printed by `harness status`.
-5. Work only within the current state rules.
+4. Read the state guardrail printed by status.
+5. Before editing product code, run `harness preflight-edit <session-id>`.
 
-## Always Do
+## Hard Rules
 
 - Treat `.harness/sessions/<session-id>/artifact.md` as canonical.
-- Use `bin/harness transition` for state changes.
-- Keep proof files under `.harness/sessions/<session-id>/proof/`.
-- Record assumptions, open questions, review findings, and validation proof in the artifact.
-- Preserve user changes. Do not overwrite existing artifact sections without reading them.
-- Keep Linear as a mirror only. Local artifact state remains the source of truth.
+- Use `harness transition` for phase changes.
+- Never bypass CLI transition guards by editing artifact status manually.
+- Never edit product code unless `harness preflight-edit <session-id>` exits 0.
+- If preflight blocks, stop and report the missing phase or artifact requirements.
+- Never write `.env` secrets into artifacts, logs, comments, or proof files.
 
-## Never Do
+## Edit Gate
 
-- Do not bypass CLI transition guards by editing artifact status manually.
-- Do not write `.env` secrets into artifacts, logs, comments, or proof files.
-- Do not put `LINEAR_API_KEY` in folder names, Markdown, screenshots, or Linear comments.
-- Do not move to `done` without final human approval and proof links.
-- Do not invent acceptance criteria when ambiguity materially changes scope.
+Product code edits are allowed only in:
 
-## Linear Rules
+- `implementation`
+- `needs-fix`
 
-- Read Linear credentials only through `.env`.
-- Store only non-secret Linear metadata in the artifact, such as issue key or URL.
-- If Linear sync fails, keep local artifact state intact and record the sync failure.
+Product code edits are forbidden in:
 
+- `start`
+- `planning`
+- `review`
+- `quality-check`
+- `done`

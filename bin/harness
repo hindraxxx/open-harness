@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -188,35 +189,140 @@ def default_agents() -> dict[str, str]:
     return {
         "common.md": """# Common Harness Agent Guardrails
 
-Before doing harness work, run `bin/harness status <session-id>`, read this file, then read the state guardrail printed by status.
+Before doing harness work:
 
-Always treat the session artifact as canonical. Use `bin/harness transition` for phase changes. Keep proof under the session proof directory.
+1. Identify the session id.
+2. Run `harness status <session-id>`.
+3. Read this file.
+4. Read the state guardrail printed by status.
+5. Before editing product code, run `harness preflight-edit <session-id>`.
 
-Never bypass CLI transition guards by editing artifact status manually. Never write `.env` secrets into artifacts, logs, comments, or proof files.
+## Hard Rules
+
+- Treat `.harness/sessions/<session-id>/artifact.md` as canonical.
+- Use `harness transition` for phase changes.
+- Never bypass CLI transition guards by editing artifact status manually.
+- Never edit product code unless `harness preflight-edit <session-id>` exits 0.
+- If preflight blocks, stop and report the missing phase or artifact requirements.
+- Never write `.env` secrets into artifacts, logs, comments, or proof files.
+
+## Edit Gate
+
+Product code edits are allowed only in:
+
+- `implementation`
+- `needs-fix`
+
+Product code edits are forbidden in:
+
+- `start`
+- `planning`
+- `review`
+- `quality-check`
+- `done`
 """,
         "start.md": """# Start State Guardrails
 
-Initialize the harness session. Do not implement code. Exit when the artifact and proof directory exist.
+Initialize the harness session.
+
+Allowed:
+
+- verify harness files
+- create or inspect the session artifact
+- transition to `planning`
+
+Forbidden:
+
+- product code edits
+- test code edits
+- implementation decisions
+
+Before any code edit, transition to `planning`, complete planning, then transition to `implementation`.
 """,
         "planning.md": """# Planning State Guardrails
 
-Explore first. Ask blocking ambiguity questions. Write acceptance criteria, validation plan, and implementation checklist. Do not implement code.
+Explore first. Ask blocking ambiguity questions. Write acceptance criteria, validation plan, and implementation checklist.
+
+Allowed:
+
+- read/search files
+- inspect existing behavior
+- write artifact planning sections
+- ask user questions
+
+Forbidden:
+
+- product code edits
+- test code edits
+- route/controller/component changes
+- proof completion
+
+Exit only through `harness transition <session-id> implementation`.
 """,
         "implementation.md": """# Implementation State Guardrails
 
-Implement approved artifact checklist items and tests. Do not perform final quality proof or mark review complete.
+Implement approved artifact checklist items and tests.
+
+Before editing product code, run:
+
+```bash
+harness preflight-edit <session-id>
+```
+
+Allowed:
+
+- code edits required by acceptance criteria
+- test edits required by validation plan
+- implementation checklist updates
+
+Forbidden:
+
+- expanding scope without returning to planning
+- marking review complete
+- marking quality proof complete
 """,
         "review.md": """# Review State Guardrails
 
-Run AI review, record human review, and convert required findings into checklist items. Fixes go back to implementation.
+Run AI review, record human review, and convert required findings into checklist items.
+
+Forbidden:
+
+- product code edits while still in review
+- fixing review findings without transitioning to `needs-fix`
+
+Required fixes go through:
+
+```bash
+harness transition <session-id> needs-fix
+```
 """,
         "quality-check.md": """# Quality Check State Guardrails
 
-Run validation from the artifact and attach proof. Failed validation goes back to needs-fix. Manual auth blockers require human proof notes.
+Run validation from the artifact and attach proof.
+
+Forbidden:
+
+- product code edits while still in quality-check
+- inventing proof
+- marking failed validation as complete
+
+Failed validation goes through:
+
+```bash
+harness transition <session-id> needs-fix
+```
+
+Manual auth blockers require human proof notes.
 """,
         "done.md": """# Done State Guardrails
 
-Verify final artifact completeness, proof links, final approval, and Linear sync result. Do not add new scope.
+Verify final artifact completeness, proof links, final approval, and Linear sync result.
+
+Forbidden:
+
+- product code edits
+- new acceptance criteria
+- new scope
 """,
     }
 
@@ -224,17 +330,55 @@ Verify final artifact completeness, proof links, final approval, and Linear sync
 def default_agents_bootstrap() -> str:
     return """# Harness Agent Bootstrap
 
-For harness work:
+For harness work, these rules are mandatory.
 
 1. Identify the session id from the user request or current artifact.
-2. Run `bin/harness status <session-id>`.
+2. Run `harness status <session-id>`.
 3. Read `.harness/agents/common.md`.
 4. Read the state-specific guardrail file printed by `harness status`.
 5. Follow the state guardrails strictly.
-6. Use `bin/harness transition` for phase changes.
-7. Never bypass transition guards by editing artifact status manually.
-8. Never write `.env` secrets into artifacts, logs, comments, or proof files.
+6. Before editing product code, run `harness preflight-edit <session-id>`.
+7. Edit product code only when preflight exits 0.
+8. Use `harness transition` for phase changes.
+9. Never bypass transition guards by editing artifact status manually.
+10. Never write `.env` secrets into artifacts, logs, comments, or proof files.
+
+If the artifact status is `start`, `planning`, `review`, `quality-check`, or `done`, product code edits are forbidden.
+
+If preflight blocks, stop and report the blocker.
 """
+
+
+def overwrite_guardrails() -> None:
+    agents_dir().mkdir(parents=True, exist_ok=True)
+    for name, content in default_agents().items():
+        (agents_dir() / name).write_text(content)
+    (root() / "AGENTS.md").write_text(default_agents_bootstrap())
+
+
+def non_harness_changes() -> list[str]:
+    try:
+        result = subprocess.run(
+            ["git", "status", "--short"],
+            cwd=root(),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except OSError:
+        return []
+    changes = []
+    for line in result.stdout.splitlines():
+        path = line[3:].strip()
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1]
+        if not path:
+            continue
+        if path.startswith(".harness/") or path in {"AGENTS.md", ".env.example"}:
+            continue
+        changes.append(path)
+    return changes
 
 
 def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
@@ -570,6 +714,11 @@ def cmd_init(_args: argparse.Namespace) -> None:
     print("initialized harness")
 
 
+def cmd_upgrade_guardrails(_args: argparse.Namespace) -> None:
+    overwrite_guardrails()
+    print("upgraded harness guardrails")
+
+
 def cmd_start(args: argparse.Namespace) -> None:
     if not re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]*$", args.session_id):
         die("session id must use letters, numbers, dot, underscore, or dash")
@@ -618,6 +767,17 @@ def cmd_status(args: argparse.Namespace) -> None:
     print(f"Linear issue: {data.get('linear_issue_key') or 'none'}")
     print(f"Common guardrail: {agents_dir() / 'common.md'}")
     print(f"State guardrail: {agents_dir() / (state + '.md')}")
+    if state in {"implementation", "needs-fix"}:
+        print("Edit gate: allowed")
+    else:
+        print(f"Edit gate: blocked in {state}")
+    changes = non_harness_changes()
+    if changes and state not in {"implementation", "needs-fix"}:
+        print("Guardrail violation: non-harness changes exist outside implementation/needs-fix")
+        for path in changes[:20]:
+            print(f"- {path}")
+        if len(changes) > 20:
+            print(f"- ... {len(changes) - 20} more")
     if missing:
         print("Missing:")
         for item in missing:
@@ -635,6 +795,19 @@ def cmd_validate(args: argparse.Namespace) -> None:
             print(f"- {item}")
         raise SystemExit(1)
     print("valid")
+
+
+def cmd_preflight_edit(args: argparse.Namespace) -> None:
+    state = current_state(args.session_id)
+    if state not in {"implementation", "needs-fix"}:
+        die(f"product code edits blocked while session is in '{state}'. Complete planning and transition to implementation first.")
+    missing = validate_requirements(args.session_id, "implementation")
+    if missing:
+        print("edit preflight blocked")
+        for item in missing:
+            print(f"- {item}")
+        raise SystemExit(1)
+    print("edit preflight allowed")
 
 
 def cmd_transition(args: argparse.Namespace) -> None:
@@ -706,6 +879,9 @@ def build_parser() -> argparse.ArgumentParser:
     init_p = sub.add_parser("init")
     init_p.set_defaults(func=cmd_init)
 
+    upgrade_p = sub.add_parser("upgrade-guardrails")
+    upgrade_p.set_defaults(func=cmd_upgrade_guardrails)
+
     start_p = sub.add_parser("start")
     start_p.add_argument("session_id")
     start_p.add_argument("--linear")
@@ -723,6 +899,10 @@ def build_parser() -> argparse.ArgumentParser:
     validate_p.add_argument("session_id")
     validate_p.add_argument("--target")
     validate_p.set_defaults(func=cmd_validate)
+
+    preflight_p = sub.add_parser("preflight-edit")
+    preflight_p.add_argument("session_id")
+    preflight_p.set_defaults(func=cmd_preflight_edit)
 
     transition_p = sub.add_parser("transition")
     transition_p.add_argument("session_id")
