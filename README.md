@@ -139,8 +139,11 @@ Move state:
 
 ```bash
 bin/harness transition req-login-timeout planning
+bin/harness approve-planning req-login-timeout --by "Liem"
 bin/harness transition req-login-timeout implementation
 ```
+
+`planning -> implementation` requires explicit planning approval. Agents must not run `approve-planning` unless the user explicitly approves the plan.
 
 Attach proof:
 
@@ -157,6 +160,8 @@ bin/harness sync-linear req-login-timeout
 `harness start --create-linear` creates a real Linear issue through the GraphQL API.
 
 `harness sync-linear` resolves the linked Linear issue, finds the mapped workflow status by name, and updates the issue state.
+
+`harness transition` attempts Linear auto-sync after a successful local transition when the artifact has `linear_issue_key`.
 
 Default Linear status mapping:
 

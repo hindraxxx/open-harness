@@ -125,6 +125,9 @@ session_id: "{{SESSION_ID}}"
 status: "start"
 linear_issue_key: "{{LINEAR_ISSUE_KEY}}"
 linear_issue_url: "{{LINEAR_ISSUE_URL}}"
+planning_approved: "false"
+planning_approved_by: ""
+planning_approved_at: ""
 created_at: "{{CREATED_AT}}"
 updated_at: "{{UPDATED_AT}}"
 ---
@@ -146,6 +149,10 @@ TBD
 ## Implementation Checklist
 
 - [ ] TBD
+
+## Planning Approval
+
+TBD
 
 ## Review
 
@@ -257,7 +264,14 @@ Forbidden:
 - route/controller/component changes
 - proof completion
 
-Exit only through `harness transition <session-id> implementation`.
+Exit only after human approval:
+
+```bash
+harness approve-planning <session-id> --by <human-name>
+harness transition <session-id> implementation
+```
+
+Agents must not run `approve-planning` unless the user explicitly instructs them to approve planning.
 """,
         "implementation.md": """# Implementation State Guardrails
 
@@ -399,7 +413,18 @@ def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
 
 
 def dump_frontmatter(data: dict[str, str], body: str) -> str:
-    keys = ["session_id", "status", "linear_issue_key", "linear_issue_url", "created_at", "updated_at", "linear_sync"]
+    keys = [
+        "session_id",
+        "status",
+        "linear_issue_key",
+        "linear_issue_url",
+        "planning_approved",
+        "planning_approved_by",
+        "planning_approved_at",
+        "created_at",
+        "updated_at",
+        "linear_sync",
+    ]
     lines = ["---"]
     for key in keys:
         if key in data:
@@ -480,6 +505,9 @@ def validate_requirements(session_id: str, target: str | None = None) -> list[st
             missing.append("Validation Plan must be filled")
         if not has_real_content(section(text, "Implementation Checklist")):
             missing.append("Implementation Checklist must be filled")
+        data, _ = parse_frontmatter(text)
+        if data.get("planning_approved") != "true":
+            missing.append("Planning must be human-approved with `harness approve-planning <session-id> --by <name>`")
 
     if check_state in {"review", "quality-check", "done"}:
         if not has_checked_item(section(text, "Implementation Checklist")):
@@ -810,6 +838,33 @@ def cmd_preflight_edit(args: argparse.Namespace) -> None:
     print("edit preflight allowed")
 
 
+def cmd_approve_planning(args: argparse.Namespace) -> None:
+    state = current_state(args.session_id)
+    if state != "planning":
+        die(f"planning approval requires session state 'planning', current state is '{state}'")
+    missing = validate_requirements(args.session_id, "planning")
+    if missing:
+        print("planning approval blocked")
+        for item in missing:
+            print(f"- {item}")
+        raise SystemExit(1)
+    path = artifact_path(args.session_id)
+    text = read_text(path)
+    approval = f"Approved by {args.by} at {now()}."
+    if "## Planning Approval\n\nTBD" in text:
+        text = text.replace("## Planning Approval\n\nTBD", f"## Planning Approval\n\n{approval}")
+        path.write_text(text)
+    update_artifact_meta(
+        args.session_id,
+        {
+            "planning_approved": "true",
+            "planning_approved_by": args.by,
+            "planning_approved_at": now(),
+        },
+    )
+    print(f"planning approved by {args.by}")
+
+
 def cmd_transition(args: argparse.Namespace) -> None:
     if args.state not in STATES:
         die(f"unknown state: {args.state}")
@@ -822,8 +877,21 @@ def cmd_transition(args: argparse.Namespace) -> None:
         for item in missing:
             print(f"- {item}")
         raise SystemExit(1)
+    if state == "planning" and args.state == "implementation":
+        changes = non_harness_changes()
+        if changes:
+            print("transition blocked")
+            print("- non-harness changes already exist before implementation gate")
+            for path in changes[:20]:
+                print(f"- {path}")
+            raise SystemExit(1)
     update_artifact_meta(args.session_id, {"status": args.state})
     print(f"transitioned: {state} -> {args.state}")
+    if artifact_meta(args.session_id).get("linear_issue_key"):
+        try:
+            sync_linear(args.session_id)
+        except SystemExit as exc:
+            print(f"linear auto-sync failed: exit {exc.code}", file=sys.stderr)
 
 
 def cmd_attach_proof(args: argparse.Namespace) -> None:
@@ -848,15 +916,15 @@ def cmd_attach_proof(args: argparse.Namespace) -> None:
     print(f"attached proof: {target}")
 
 
-def cmd_sync_linear(args: argparse.Namespace) -> None:
+def sync_linear(session_id: str) -> str:
     env = load_env()
     if not env.get("LINEAR_API_KEY"):
         die("missing LINEAR_API_KEY in project .env, global ~/.config/harness/.env, or environment; local artifact unchanged")
-    data = artifact_meta(args.session_id)
+    data = artifact_meta(session_id)
     issue_key = data.get("linear_issue_key")
     if not issue_key:
         die("artifact has no linear_issue_key")
-    state = current_state(args.session_id)
+    state = current_state(session_id)
     state_name = load_linear_state_map().get(state)
     if not state_name:
         die(f"no Linear state mapping for harness state: {state}")
@@ -868,8 +936,12 @@ def cmd_sync_linear(args: argparse.Namespace) -> None:
         available = ", ".join(sorted(name for name in state_by_name if name))
         die(f"Linear state '{state_name}' not found for issue team. Available: {available}")
     updated = update_linear_issue_state(env, issue["id"], linear_state["id"])
-    update_artifact_meta(args.session_id, {"linear_sync": f"state:{updated['state']['name']}:{now()}"})
-    print(f"linear synced: {issue_key} -> {updated['state']['name']}")
+    update_artifact_meta(session_id, {"linear_sync": f"state:{updated['state']['name']}:{now()}"})
+    return f"linear synced: {issue_key} -> {updated['state']['name']}"
+
+
+def cmd_sync_linear(args: argparse.Namespace) -> None:
+    print(sync_linear(args.session_id))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -903,6 +975,11 @@ def build_parser() -> argparse.ArgumentParser:
     preflight_p = sub.add_parser("preflight-edit")
     preflight_p.add_argument("session_id")
     preflight_p.set_defaults(func=cmd_preflight_edit)
+
+    approve_p = sub.add_parser("approve-planning")
+    approve_p.add_argument("session_id")
+    approve_p.add_argument("--by", required=True)
+    approve_p.set_defaults(func=cmd_approve_planning)
 
     transition_p = sub.add_parser("transition")
     transition_p.add_argument("session_id")

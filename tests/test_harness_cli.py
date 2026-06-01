@@ -83,6 +83,31 @@ class HarnessCliTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("product code edits blocked", result.stderr)
 
+    def test_planning_to_implementation_requires_approval(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            self.run_cli(cwd, "start", "req-login-timeout")
+            artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
+            text = artifact.read_text()
+            text = text.replace("- [ ] TBD", "- [ ] Build download flow", 3)
+            text = text.replace("TBD", "Download Neraca as Excel", 1)
+            text = text.replace("TBD", "Given user exports Neraca, file downloads successfully", 1)
+            text = text.replace("TBD", "Run controller unit test", 1)
+            artifact.write_text(text)
+
+            self.run_cli(cwd, "transition", "req-login-timeout", "planning")
+            blocked = self.run_cli(cwd, "transition", "req-login-timeout", "implementation", check=False)
+
+            self.assertNotEqual(blocked.returncode, 0)
+            self.assertIn("Planning must be human-approved", blocked.stdout)
+
+            self.run_cli(cwd, "approve-planning", "req-login-timeout", "--by", "Liem")
+            allowed = self.run_cli(cwd, "transition", "req-login-timeout", "implementation")
+
+            self.assertIn("transitioned: planning -> implementation", allowed.stdout)
+            self.assertIn('planning_approved: "true"', artifact.read_text())
+
     def test_upgrade_guardrails_overwrites_bootstrap(self):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)
@@ -278,6 +303,80 @@ class HarnessCliTest(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("missing LINEAR_TEAM_ID", result.stderr)
+
+    def test_transition_auto_syncs_linear(self):
+        requests = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                length = int(self.headers["Content-Length"])
+                body = self.rfile.read(length).decode("utf-8")
+                requests.append(body)
+                if "query HarnessIssue" in body:
+                    response = {
+                        "data": {
+                            "issue": {
+                                "id": "issue-id",
+                                "identifier": "WF-123",
+                                "title": "Login Timeout",
+                                "url": "https://linear.app/example/issue/WF-123/login-timeout",
+                                "state": {"id": "backlog-id", "name": "Backlog"},
+                                "team": {
+                                    "id": "team-id",
+                                    "states": {
+                                        "nodes": [
+                                            {"id": "backlog-id", "name": "Backlog"},
+                                            {"id": "planning-id", "name": "Planning"},
+                                        ]
+                                    },
+                                },
+                            }
+                        }
+                    }
+                else:
+                    response = {
+                        "data": {
+                            "issueUpdate": {
+                                "success": True,
+                                "issue": {
+                                    "id": "issue-id",
+                                    "identifier": "WF-123",
+                                    "state": {"id": "planning-id", "name": "Planning"},
+                                },
+                            }
+                        }
+                    }
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(__import__("json").dumps(response).encode("utf-8"))
+
+            def log_message(self, _format, *args):
+                return
+
+        server = HTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                cwd = Path(tmp)
+                env = {
+                    "HARNESS_LINEAR_API_URL": f"http://127.0.0.1:{server.server_port}/graphql",
+                    "HARNESS_GLOBAL_ENV": str(Path(tmp) / "missing.env"),
+                    "LINEAR_API_KEY": "test-token",
+                }
+                self.run_cli(cwd, "init", env=env)
+                result = self.run_cli(cwd, "start", "req-login-timeout", "--linear", "WF-123", env=env)
+                self.assertIn("linear issue: WF-123", result.stdout)
+                transition = self.run_cli(cwd, "transition", "req-login-timeout", "planning", env=env)
+
+                self.assertIn("transitioned: start -> planning", transition.stdout)
+                artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
+                self.assertIn('linear_sync: "state:Planning:', artifact.read_text())
+                self.assertEqual(len(requests), 2)
+        finally:
+            server.shutdown()
+            server.server_close()
 
     def test_attach_proof_records_link(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -16,4 +16,11 @@ Forbidden:
 - route/controller/component changes
 - proof completion
 
-Exit only through `harness transition <session-id> implementation`.
+Exit only after human approval:
+
+```bash
+harness approve-planning <session-id> --by <human-name>
+harness transition <session-id> implementation
+```
+
+Agents must not run `approve-planning` unless the user explicitly instructs them to approve planning.

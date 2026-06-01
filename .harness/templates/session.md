@@ -3,6 +3,9 @@ session_id: "{{SESSION_ID}}"
 status: "start"
 linear_issue_key: "{{LINEAR_ISSUE_KEY}}"
 linear_issue_url: "{{LINEAR_ISSUE_URL}}"
+planning_approved: "false"
+planning_approved_by: ""
+planning_approved_at: ""
 created_at: "{{CREATED_AT}}"
 updated_at: "{{UPDATED_AT}}"
 ---
@@ -24,6 +27,10 @@ TBD
 ## Implementation Checklist
 
 - [ ] TBD
+
+## Planning Approval
+
+TBD
 
 ## Review
 
@@ -60,4 +67,3 @@ TBD
 ## Notes
 
 TBD
-
