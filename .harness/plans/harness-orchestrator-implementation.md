@@ -264,12 +264,15 @@ Blocks edits in:
 
 Records explicit human planning approval in artifact metadata and the `Planning Approval` section.
 
+Marks `## Acceptance Criteria` checklist items checked to record requirement approval.
+
 Also stores a hash of the approved planning sections:
 
 - `Requirement Summary`
 - `Acceptance Criteria`
 - `Validation Plan`
-- `Implementation Checklist`
+
+`Validation Plan` and `Implementation Checklist` remain execution checklists. `Implementation Checklist` is required before planning approval, but it is not included in the approval hash. Checking implementation items during implementation must not invalidate planning approval.
 
 Required before:
 

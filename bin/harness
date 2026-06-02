@@ -783,13 +783,24 @@ def planning_snapshot(text: str) -> str:
         section(text, "Acceptance Criteria"),
         "Validation Plan",
         section(text, "Validation Plan"),
-        "Implementation Checklist",
-        section(text, "Implementation Checklist"),
     ]
     normalized = "\n".join(part.strip() for part in parts)
     normalized = re.sub(r"[ \t]+", " ", normalized)
     normalized = re.sub(r"\n{3,}", "\n\n", normalized).strip()
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def check_section_items(text: str, heading: str) -> str:
+    match = re.search(rf"^## {re.escape(heading)}\s*$", text, re.MULTILINE)
+    if not match:
+        return text
+    content_start = match.end()
+    remainder = text[content_start:]
+    next_heading = re.search(r"^## ", remainder, re.MULTILINE)
+    content_end = content_start + (next_heading.start() if next_heading else len(remainder))
+    content = text[content_start:content_end]
+    checked = re.sub(r"^-\s*\[ \]\s+", "- [x] ", content, flags=re.MULTILINE)
+    return text[:content_start] + checked + text[content_end:]
 
 
 def quality_evidence_present(text: str) -> bool:
@@ -1337,9 +1348,10 @@ def cmd_approve_planning(args: argparse.Namespace) -> None:
     path = artifact_path(args.session_id)
     text = read_text(path)
     approval = f"Approved by {args.by} at {now()}."
+    text = check_section_items(text, "Acceptance Criteria")
     if "## Planning Approval\n\nTBD" in text:
         text = text.replace("## Planning Approval\n\nTBD", f"## Planning Approval\n\n{approval}")
-        path.write_text(text)
+    path.write_text(text)
     update_artifact_meta(
         args.session_id,
         {
