@@ -1,9 +1,8 @@
 import os
+import sqlite3
 import subprocess
 import tempfile
-import threading
 import unittest
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Optional
 
@@ -80,24 +79,41 @@ class HarnessCliTest(unittest.TestCase):
             self.run_cli(cwd, "init")
 
             self.assertTrue((cwd / ".harness" / "harness.yml").exists())
+            self.assertTrue((cwd / ".harness" / "harness.db").exists())
             self.assertTrue((cwd / ".harness" / "templates" / "session.md").exists())
             self.assertTrue((cwd / ".harness" / "agents" / "planning.md").exists())
             self.assertTrue((cwd / ".harness" / "project" / "index.md").exists())
             self.assertTrue((cwd / "AGENTS.md").exists())
             self.assertIn(".env", (cwd / ".gitignore").read_text().splitlines())
 
-    def test_start_uses_local_session_id_and_linear_metadata(self):
+    def test_start_uses_local_session_id_and_sqlite_state(self):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)
             self.run_cli(cwd, "init")
-            self.run_cli(cwd, "start", "req-login-timeout", "--linear", "WF-123")
+            self.run_cli(cwd, "start", "req-login-timeout")
 
             artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
             self.assertTrue(artifact.exists())
             self.assertTrue((artifact.parent / "proof").is_dir())
             text = artifact.read_text()
             self.assertIn('session_id: "req-login-timeout"', text)
-            self.assertIn('linear_issue_key: "WF-123"', text)
+            self.assertNotIn("linear_issue_key", text)
+            with sqlite3.connect(cwd / ".harness" / "harness.db") as conn:
+                row = conn.execute("SELECT state FROM sessions WHERE session_id = ?", ("req-login-timeout",)).fetchone()
+            self.assertEqual(("start",), row)
+
+    def test_start_strips_legacy_linear_template_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            template = cwd / ".harness" / "templates" / "session.md"
+            template.write_text(template.read_text().replace('status: "start"\n', 'status: "start"\nlinear_issue_key: "{{LINEAR_ISSUE_KEY}}"\nlinear_issue_url: "{{LINEAR_ISSUE_URL}}"\n'))
+
+            self.run_cli(cwd, "start", "req-login-timeout")
+
+            artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
+            self.assertNotIn("linear_issue_key", artifact.read_text())
+            self.assertNotIn("linear_issue_url", artifact.read_text())
 
     def test_invalid_transition_is_blocked(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -281,6 +297,9 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("#### Review pass", text)
             self.assertIn("No blocking issues.", text)
             self.assertIn("### Human Review\n\nTBD", text)
+            with sqlite3.connect(cwd / ".harness" / "harness.db") as conn:
+                count = conn.execute("SELECT COUNT(*) FROM review_passes WHERE session_id = ?", ("req-login-timeout",)).fetchone()[0]
+            self.assertEqual(1, count)
 
     def test_record_review_appends_file_and_human_selected_required_fixes(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -303,6 +322,9 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("Found validation gap.", text)
             self.assertIn("### Required Fixes", text)
             self.assertIn("- [ ] Add missing validation test", text)
+            with sqlite3.connect(cwd / ".harness" / "harness.db") as conn:
+                row = conn.execute("SELECT description, resolved FROM required_fixes WHERE session_id = ?", ("req-login-timeout",)).fetchone()
+            self.assertEqual(("Add missing validation test", 0), row)
 
     def test_record_review_without_required_fix_leaves_required_fixes_unchanged(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -564,263 +586,77 @@ class HarnessCliTest(unittest.TestCase):
 
             self.assertEqual(0, self.run_cli(cwd, "validate", "req-login-timeout").returncode)
 
-    def test_missing_linear_token_blocks_only_sync(self):
+    def test_linear_commands_are_removed(self):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)
-            env = {"HARNESS_GLOBAL_ENV": str(Path(tmp) / "missing.env")}
-            self.run_cli(cwd, "init", env=env)
-            self.run_cli(cwd, "start", "req-login-timeout", "--linear", "WF-123", env=env)
+            self.run_cli(cwd, "init")
 
-            result = self.run_cli(cwd, "sync-linear", "req-login-timeout", check=False, env=env)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("missing LINEAR_API_KEY", result.stderr)
+            start = self.run_cli(cwd, "start", "req-login-timeout", "--linear", "WF-123", check=False)
+            sync = self.run_cli(cwd, "sync-linear", "req-login-timeout", check=False)
+
+            self.assertNotEqual(start.returncode, 0)
+            self.assertNotEqual(sync.returncode, 0)
+            self.assertIn("unrecognized arguments: --linear", start.stderr)
+            self.assertIn("invalid choice", sync.stderr)
+
+    def test_transition_updates_sqlite_and_artifact_mirror(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            self.run_cli(cwd, "start", "req-login-timeout")
+            self.run_cli(cwd, "transition", "req-login-timeout", "planning")
+
             artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
-            self.assertIn('status: "start"', artifact.read_text())
+            self.assertIn('status: "planning"', artifact.read_text())
+            with sqlite3.connect(cwd / ".harness" / "harness.db") as conn:
+                state = conn.execute("SELECT state FROM sessions WHERE session_id = ?", ("req-login-timeout",)).fetchone()[0]
+                transition_count = conn.execute("SELECT COUNT(*) FROM transitions").fetchone()[0]
+            self.assertEqual("planning", state)
+            self.assertEqual(1, transition_count)
 
-    def test_global_env_allows_linear_sync(self):
-        requests = []
-
-        class Handler(BaseHTTPRequestHandler):
-            def do_POST(self):
-                length = int(self.headers["Content-Length"])
-                body = self.rfile.read(length).decode("utf-8")
-                requests.append(body)
-                if "query HarnessIssue" in body:
-                    response = {
-                        "data": {
-                            "issue": {
-                                "id": "issue-id",
-                                "identifier": "WF-123",
-                                "title": "Login Timeout",
-                                "url": "https://linear.app/example/issue/WF-123/login-timeout",
-                                "state": {"id": "backlog-id", "name": "Backlog"},
-                                "team": {
-                                    "id": "team-id",
-                                    "states": {
-                                        "nodes": [
-                                            {"id": "backlog-id", "name": "Backlog"},
-                                            {"id": "planning-id", "name": "Planning"},
-                                        ]
-                                    },
-                                },
-                            }
-                        }
-                    }
-                else:
-                    response = {
-                        "data": {
-                            "issueUpdate": {
-                                "success": True,
-                                "issue": {
-                                    "id": "issue-id",
-                                    "identifier": "WF-123",
-                                    "state": {"id": "backlog-id", "name": "Backlog"},
-                                },
-                            }
-                        }
-                    }
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(__import__("json").dumps(response).encode("utf-8"))
-
-            def log_message(self, _format, *args):
-                return
-
-        server = HTTPServer(("127.0.0.1", 0), Handler)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-
-        try:
-            with tempfile.TemporaryDirectory() as tmp:
-                cwd = Path(tmp) / "project"
-                cwd.mkdir()
-                global_env = Path(tmp) / "global.env"
-                global_env.write_text("LINEAR_API_KEY=global-token\n")
-                env = {
-                    "HARNESS_GLOBAL_ENV": str(global_env),
-                    "HARNESS_LINEAR_API_URL": f"http://127.0.0.1:{server.server_port}/graphql",
-                }
-
-                self.run_cli(cwd, "init", env=env)
-                self.run_cli(cwd, "start", "req-login-timeout", "--linear", "WF-123", env=env)
-                result = self.run_cli(cwd, "sync-linear", "req-login-timeout", env=env)
-
-                self.assertIn("linear synced: WF-123 -> Backlog", result.stdout)
-                artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
-                self.assertIn('linear_sync: "state:Backlog:', artifact.read_text())
-                self.assertEqual(len(requests), 2)
-        finally:
-            server.shutdown()
-            server.server_close()
-
-    def test_project_env_overrides_missing_global_env(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            cwd = Path(tmp) / "project"
-            cwd.mkdir()
-            global_env = Path(tmp) / "missing-global.env"
-            env = {
-                "HARNESS_GLOBAL_ENV": str(global_env),
-                "HARNESS_LINEAR_API_URL": "http://127.0.0.1:9/graphql",
-            }
-
-            self.run_cli(cwd, "init", env=env)
-            (cwd / ".env").write_text("LINEAR_API_KEY=project-token\n")
-            self.run_cli(cwd, "start", "req-login-timeout", "--linear", "WF-123", env=env)
-            result = self.run_cli(cwd, "sync-linear", "req-login-timeout", check=False, env=env)
-
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("Linear API request failed", result.stderr)
-
-    def test_start_can_create_linear_issue(self):
-        requests = []
-
-        class Handler(BaseHTTPRequestHandler):
-            def do_POST(self):
-                length = int(self.headers["Content-Length"])
-                requests.append((self.headers, self.rfile.read(length).decode("utf-8")))
-                response = {
-                    "data": {
-                        "issueCreate": {
-                            "success": True,
-                            "issue": {
-                                "id": "issue-id",
-                                "identifier": "WF-999",
-                                "title": "Login Timeout",
-                                "url": "https://linear.app/example/issue/WF-999/login-timeout",
-                            },
-                        }
-                    }
-                }
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(__import__("json").dumps(response).encode("utf-8"))
-
-            def log_message(self, _format, *args):
-                return
-
-        server = HTTPServer(("127.0.0.1", 0), Handler)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-
-        try:
-            with tempfile.TemporaryDirectory() as tmp:
-                cwd = Path(tmp)
-                env = {
-                    "HARNESS_LINEAR_API_URL": f"http://127.0.0.1:{server.server_port}/graphql",
-                    "HARNESS_GLOBAL_ENV": str(Path(tmp) / "missing.env"),
-                    "LINEAR_API_KEY": "test-token",
-                    "LINEAR_TEAM_ID": "team-id",
-                    "LINEAR_PROJECT_ID": "project-id",
-                }
-                self.run_cli(cwd, "init", env=env)
-                result = self.run_cli(
-                    cwd,
-                    "start",
-                    "req-login-timeout",
-                    "--create-linear",
-                    "--title",
-                    "Login Timeout",
-                    "--description",
-                    "Harness session",
-                    env=env,
-                )
-
-                self.assertIn("linear issue: WF-999", result.stdout)
-                artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
-                text = artifact.read_text()
-                self.assertIn('linear_issue_key: "WF-999"', text)
-                self.assertIn('linear_issue_url: "https://linear.app/example/issue/WF-999/login-timeout"', text)
-                self.assertEqual(requests[0][0]["Authorization"], "test-token")
-                self.assertIn('"projectId": "project-id"', requests[0][1])
-        finally:
-            server.shutdown()
-            server.server_close()
-
-    def test_create_linear_requires_team_id(self):
+    def test_sqlite_state_wins_over_artifact_status(self):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)
-            env = {"LINEAR_API_KEY": "test-token", "HARNESS_GLOBAL_ENV": str(Path(tmp) / "missing.env")}
-            self.run_cli(cwd, "init", env=env)
-            result = self.run_cli(cwd, "start", "req-login-timeout", "--create-linear", check=False, env=env)
+            self.run_cli(cwd, "init")
+            self.run_cli(cwd, "start", "req-login-timeout")
+            self.run_cli(cwd, "transition", "req-login-timeout", "planning")
+            artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
+            artifact.write_text(artifact.read_text().replace('status: "planning"', 'status: "done"'))
+
+            result = self.run_cli(cwd, "status", "req-login-timeout")
+
+            self.assertIn("State: planning", result.stdout)
+
+    def test_migrate_sqlite_imports_existing_markdown_session(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            db = cwd / ".harness" / "harness.db"
+            db.unlink()
+            artifact = cwd / ".harness" / "sessions" / "legacy" / "artifact.md"
+            artifact.parent.mkdir(parents=True)
+            artifact.write_text('---\nsession_id: "legacy"\nstatus: "review"\ncreated_at: "2026-01-01T00:00:00+00:00"\nupdated_at: "2026-01-01T00:00:00+00:00"\n---\n# Legacy\n')
+
+            result = self.run_cli(cwd, "migrate-sqlite")
+
+            self.assertIn("migrated sessions: 1", result.stdout)
+            with sqlite3.connect(db) as conn:
+                row = conn.execute("SELECT state FROM sessions WHERE session_id = ?", ("legacy",)).fetchone()
+            self.assertEqual(("review",), row)
+
+    def test_doctor_reports_artifact_status_mirror_mismatch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            self.run_cli(cwd, "start", "req-login-timeout")
+            self.run_cli(cwd, "transition", "req-login-timeout", "planning")
+            artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
+            artifact.write_text(artifact.read_text().replace('status: "planning"', 'status: "done"'))
+
+            result = self.run_cli(cwd, "doctor", check=False)
 
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("missing LINEAR_TEAM_ID", result.stderr)
-
-    def test_transition_auto_syncs_linear(self):
-        requests = []
-
-        class Handler(BaseHTTPRequestHandler):
-            def do_POST(self):
-                length = int(self.headers["Content-Length"])
-                body = self.rfile.read(length).decode("utf-8")
-                requests.append(body)
-                if "query HarnessIssue" in body:
-                    response = {
-                        "data": {
-                            "issue": {
-                                "id": "issue-id",
-                                "identifier": "WF-123",
-                                "title": "Login Timeout",
-                                "url": "https://linear.app/example/issue/WF-123/login-timeout",
-                                "state": {"id": "backlog-id", "name": "Backlog"},
-                                "team": {
-                                    "id": "team-id",
-                                    "states": {
-                                        "nodes": [
-                                            {"id": "backlog-id", "name": "Backlog"},
-                                            {"id": "planning-id", "name": "Planning"},
-                                        ]
-                                    },
-                                },
-                            }
-                        }
-                    }
-                else:
-                    response = {
-                        "data": {
-                            "issueUpdate": {
-                                "success": True,
-                                "issue": {
-                                    "id": "issue-id",
-                                    "identifier": "WF-123",
-                                    "state": {"id": "planning-id", "name": "Planning"},
-                                },
-                            }
-                        }
-                    }
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(__import__("json").dumps(response).encode("utf-8"))
-
-            def log_message(self, _format, *args):
-                return
-
-        server = HTTPServer(("127.0.0.1", 0), Handler)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        try:
-            with tempfile.TemporaryDirectory() as tmp:
-                cwd = Path(tmp)
-                env = {
-                    "HARNESS_LINEAR_API_URL": f"http://127.0.0.1:{server.server_port}/graphql",
-                    "HARNESS_GLOBAL_ENV": str(Path(tmp) / "missing.env"),
-                    "LINEAR_API_KEY": "test-token",
-                }
-                self.run_cli(cwd, "init", env=env)
-                result = self.run_cli(cwd, "start", "req-login-timeout", "--linear", "WF-123", env=env)
-                self.assertIn("linear issue: WF-123", result.stdout)
-                transition = self.run_cli(cwd, "transition", "req-login-timeout", "planning", env=env)
-
-                self.assertIn("transitioned: start -> planning", transition.stdout)
-                artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
-                self.assertIn('linear_sync: "state:Planning:', artifact.read_text())
-                self.assertEqual(len(requests), 2)
-        finally:
-            server.shutdown()
-            server.server_close()
+            self.assertIn("differs from SQLite state", result.stdout)
 
     def test_attach_proof_records_link(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -834,6 +670,9 @@ class HarnessCliTest(unittest.TestCase):
             artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
             self.assertIn("- [x] [result.txt](proof/result.txt)", artifact.read_text())
             self.assertTrue((artifact.parent / "proof" / "result.txt").exists())
+            with sqlite3.connect(cwd / ".harness" / "harness.db") as conn:
+                row = conn.execute("SELECT path FROM proofs WHERE session_id = ?", ("req-login-timeout",)).fetchone()
+            self.assertTrue(row[0].endswith("proof/result.txt"))
 
     def test_attach_proof_records_link_under_quality_check_proof(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -5,9 +5,9 @@ Local harness orchestrator for agent-driven engineering workflows.
 Model:
 
 - Agent calls the CLI.
-- CLI manages session artifacts and state transitions.
-- Markdown remains canonical.
-- Linear is optional and mirrors state from global or project `.env` credentials.
+- CLI manages local SQLite state, session artifacts, and transition gates.
+- SQLite is canonical for orchestration state.
+- Markdown remains the human-readable agent artifact.
 
 ## Install
 
@@ -35,44 +35,6 @@ You can also symlink it:
 ln -sf /path/to/workflow-project/bin/harness /usr/local/bin/harness
 ```
 
-## Configure Linear
-
-Recommended: store Linear credentials once in the global harness env.
-
-```bash
-mkdir -p ~/.config/harness
-cat > ~/.config/harness/.env <<'EOF'
-LINEAR_API_KEY=lin_api_xxx
-LINEAR_TEAM_ID=
-LINEAR_PROJECT_ID=
-EOF
-chmod 600 ~/.config/harness/.env
-```
-
-The CLI reads config in this precedence order:
-
-1. Project `.env`
-2. Global `~/.config/harness/.env`
-3. Process environment variables
-
-Project `.env` is only needed for per-project overrides.
-
-Optional project override:
-
-```bash
-cp .env.example .env
-```
-
-Fill only local secrets:
-
-```env
-LINEAR_API_KEY=lin_api_xxx
-LINEAR_TEAM_ID=
-LINEAR_PROJECT_ID=
-```
-
-Project `.env` is ignored by git. Do not place `LINEAR_API_KEY` in artifacts or proof files.
-
 ## Usage
 
 Initialize harness files:
@@ -81,38 +43,12 @@ Initialize harness files:
 bin/harness init
 ```
 
+This creates `.harness/harness.db`, templates, guardrails, and project map files. The SQLite DB is local-only and ignored by git.
+
 Create a session:
 
 ```bash
-bin/harness start req-login-timeout --linear WF-123
-```
-
-Or create the Linear issue automatically:
-
-```bash
-bin/harness start req-login-timeout --create-linear --title "Login timeout requirement"
-```
-
-`--create-linear` requires:
-
-```env
-LINEAR_API_KEY=lin_api_xxx
-LINEAR_TEAM_ID=<team uuid>
-```
-
-Optional:
-
-```env
-LINEAR_PROJECT_ID=<project uuid>
-```
-
-You can add a description:
-
-```bash
-bin/harness start req-login-timeout \
-  --create-linear \
-  --title "Login timeout requirement" \
-  --description "Harness planning session for login timeout behavior."
+bin/harness start req-login-timeout
 ```
 
 Check status and guardrails:
@@ -187,42 +123,34 @@ Attach proof:
 bin/harness attach-proof req-login-timeout ./proof-output.txt
 ```
 
-Sync Linear:
+Check local harness integrity:
 
 ```bash
-bin/harness sync-linear req-login-timeout
+bin/harness doctor
 ```
 
-`harness start --create-linear` creates a real Linear issue through the GraphQL API.
-
-`harness sync-linear` resolves the linked Linear issue, finds the mapped workflow status by name, and updates the issue state.
-
-`harness transition` attempts Linear auto-sync after a successful local transition when the artifact has `linear_issue_key`.
-
-Default Linear status mapping:
-
-```yaml
-linear_state_map:
-  start: Backlog
-  planning: Planning
-  implementation: In Progress
-  review: Human Review
-  needs-fix: In Progress
-  quality-check: Quality Check
-  done: Done
-```
-
-Edit `.harness/harness.yml` if your Linear workflow uses different status names.
-
-## Upgrade Existing Project Guardrails
-
-If a project already ran `harness init`, refresh its root `AGENTS.md` and `.harness/agents/*.md` guardrails:
+Migrate existing Markdown-only sessions into SQLite:
 
 ```bash
+bin/harness migrate-sqlite
+```
+
+If SQLite and Markdown frontmatter disagree, SQLite is canonical. `doctor` reports mirror mismatches.
+
+## Upgrade Existing Projects
+
+If a project already ran an older harness version, create the local SQLite DB, import existing sessions, and refresh guardrails:
+
+```bash
+harness init
+harness migrate-sqlite
 harness sync-guardrails --force
+harness doctor
 ```
 
-Use this after CLI upgrades. It overwrites only the agent guardrail files and root `AGENTS.md`.
+`harness init` does not overwrite existing non-empty templates or project maps. New sessions created from legacy templates automatically strip old Linear metadata fields.
+
+Use `sync-guardrails --force` after CLI upgrades. It overwrites only the agent guardrail files and root `AGENTS.md`.
 
 Legacy alias:
 

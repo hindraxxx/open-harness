@@ -1,8 +1,6 @@
 ---
 session_id: "{{SESSION_ID}}"
 status: "start"
-linear_issue_key: "{{LINEAR_ISSUE_KEY}}"
-linear_issue_url: "{{LINEAR_ISSUE_URL}}"
 planning_approved: "false"
 planning_approved_by: ""
 planning_approved_at: ""

@@ -1,6 +1,6 @@
 # Done State Guardrails
 
-Verify final artifact completeness, proof links, final approval, and Linear sync result.
+Verify final artifact completeness, proof links, final approval, and SQLite state.
 
 Forbidden:
 
