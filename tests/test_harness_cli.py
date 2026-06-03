@@ -58,6 +58,22 @@ class HarnessCliTest(unittest.TestCase):
         self.run_cli(cwd, "transition", "req-login-timeout", "quality-check")
         return artifact
 
+    def enter_review(self, cwd: Path) -> Path:
+        self.run_cli(cwd, "init")
+        self.run_cli(cwd, "start", "req-login-timeout")
+        artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
+        text = artifact.read_text()
+        text = text.replace("TBD", "Download Neraca as Excel", 1)
+        text = text.replace("- [ ] TBD", "- [x] Acceptance exists", 1)
+        text = text.replace("- [ ] TBD", "- [x] Run validation", 1)
+        text = text.replace("- [ ] TBD", "- [x] Implementation complete", 1)
+        artifact.write_text(text)
+        self.run_cli(cwd, "transition", "req-login-timeout", "planning")
+        self.run_cli(cwd, "approve-planning", "req-login-timeout", "--by", "Liem")
+        self.run_cli(cwd, "transition", "req-login-timeout", "implementation")
+        self.run_cli(cwd, "transition", "req-login-timeout", "review")
+        return artifact
+
     def test_init_creates_project_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)
@@ -251,6 +267,64 @@ class HarnessCliTest(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("Implementation Checklist must be fully checked before review", result.stdout)
+
+    def test_record_review_writes_ai_review_from_argument(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            artifact = self.enter_review(cwd)
+
+            result = self.run_cli(cwd, "record-review", "req-login-timeout", "--ai", "No blocking issues.")
+
+            self.assertIn("recorded AI review", result.stdout)
+            text = artifact.read_text()
+            self.assertIn("### AI Review", text)
+            self.assertIn("#### Review pass", text)
+            self.assertIn("No blocking issues.", text)
+            self.assertIn("### Human Review\n\nTBD", text)
+
+    def test_record_review_appends_file_and_human_selected_required_fixes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            artifact = self.enter_review(cwd)
+            review = cwd / "review.md"
+            review.write_text("Found validation gap.\n")
+
+            self.run_cli(
+                cwd,
+                "record-review",
+                "req-login-timeout",
+                "--file",
+                str(review),
+                "--required-fix",
+                "Add missing validation test",
+            )
+
+            text = artifact.read_text()
+            self.assertIn("Found validation gap.", text)
+            self.assertIn("### Required Fixes", text)
+            self.assertIn("- [ ] Add missing validation test", text)
+
+    def test_record_review_without_required_fix_leaves_required_fixes_unchanged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            artifact = self.enter_review(cwd)
+
+            self.run_cli(cwd, "record-review", "req-login-timeout", "--ai", "P2: optional cleanup.")
+
+            text = artifact.read_text()
+            self.assertIn("P2: optional cleanup.", text)
+            self.assertIn("### Required Fixes\n\nNone.", text)
+
+    def test_record_review_requires_review_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            self.run_cli(cwd, "start", "req-login-timeout")
+
+            result = self.run_cli(cwd, "record-review", "req-login-timeout", "--ai", "No issues.", check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("requires session state 'review'", result.stderr)
 
     def test_implementation_reports_quality_evidence_recorded_too_early(self):
         with tempfile.TemporaryDirectory() as tmp:

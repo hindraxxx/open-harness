@@ -300,6 +300,19 @@ Required before:
 
 Agents must not run this command unless the user explicitly approves the review.
 
+### `harness record-review <session-id>`
+
+Records AI review output under `## Review > AI Review`.
+
+Supported input:
+
+- `--ai "review text"`
+- `--file review.md`
+
+AI findings are advisory. They must not automatically become required fixes. Only human-selected blockers should be recorded with:
+
+- `--required-fix "fix description"`
+
 ### `harness attach-proof <session-id> <file>`
 
 Copies or records proof under:
@@ -459,7 +472,7 @@ State-specific intent:
 - start: initialize harness files and verify CLI availability
 - planning: ask ambiguity questions, explore repo, write acceptance criteria and validation plan
 - implementation: only implement code/tests and fix approved review items
-- review: run AI code review, record human review, add required fixes to checklist
+- review: run AI code review, record AI findings, wait for human review, add only human-selected required fixes to checklist
 - quality-check: execute validation plan, attach proof, route failures to `needs-fix`
 - done: verify completion gates and sync Linear
 

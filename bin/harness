@@ -459,7 +459,29 @@ Forbidden:
 """,
         "review.md": """# Review State Guardrails
 
-Run AI review, record human review, and convert required findings into checklist items.
+Run AI review, record findings, and wait for human review.
+
+After running AI review, immediately record it in the artifact before responding:
+
+```bash
+harness record-review <session-id> --file review.md
+```
+
+or:
+
+```bash
+harness record-review <session-id> --ai "No blocking issues."
+```
+
+AI findings are advisory until the human decides. Do not add required fixes just because AI found something.
+
+Only when the user explicitly decides a finding must be fixed, record it as a required fix:
+
+```bash
+harness record-review <session-id> --file review.md --required-fix "Fix validation gap"
+```
+
+A chat-only review is incomplete.
 
 Forbidden:
 
@@ -486,6 +508,7 @@ Before quality-check:
 - `## Implementation Checklist` must be fully checked.
 - `## Review > AI Review` must be filled.
 - `## Review > Human Review` must be filled.
+- `## Review > Required Fixes` must contain only human-selected required fixes.
 - `## Review > Required Fixes` must be `None.` or all required fix checklist items must be resolved through `needs-fix`.
 """,
         "quality-check.md": """# Quality Check State Guardrails
@@ -801,6 +824,35 @@ def check_section_items(text: str, heading: str) -> str:
     content = text[content_start:content_end]
     checked = re.sub(r"^-\s*\[ \]\s+", "- [x] ", content, flags=re.MULTILINE)
     return text[:content_start] + checked + text[content_end:]
+
+
+def replace_subsection(text: str, section_heading: str, subsection_heading: str, content: str) -> str:
+    section_match = re.search(rf"^## {re.escape(section_heading)}\s*$", text, re.MULTILINE)
+    if not section_match:
+        return text.rstrip() + f"\n\n## {section_heading}\n\n### {subsection_heading}\n\n{content.strip()}\n"
+    subsection_match = re.search(
+        rf"^### {re.escape(subsection_heading)}\s*$",
+        text[section_match.end() :],
+        re.MULTILINE,
+    )
+    if not subsection_match:
+        insert_at = section_match.end()
+        return text[:insert_at] + f"\n\n### {subsection_heading}\n\n{content.strip()}\n" + text[insert_at:]
+    content_start = section_match.end() + subsection_match.end()
+    remainder = text[content_start:]
+    next_heading = re.search(r"^### |^## ", remainder, re.MULTILINE)
+    content_end = content_start + (next_heading.start() if next_heading else len(remainder))
+    replacement = f"\n\n{content.strip()}\n\n"
+    return text[:content_start] + replacement + text[content_end:]
+
+
+def append_subsection(text: str, section_heading: str, subsection_heading: str, content: str) -> str:
+    existing = subsection(section(text, section_heading), subsection_heading)
+    if has_real_content(existing) and existing.strip() != "None.":
+        new_content = existing.rstrip() + f"\n\n{content.strip()}"
+    else:
+        new_content = content.strip()
+    return replace_subsection(text, section_heading, subsection_heading, new_content)
 
 
 def quality_evidence_present(text: str) -> bool:
@@ -1393,6 +1445,33 @@ def cmd_approve_review(args: argparse.Namespace) -> None:
     print(f"review approved by {args.by}")
 
 
+def cmd_record_review(args: argparse.Namespace) -> None:
+    state = current_state(args.session_id)
+    if state != "review":
+        die(f"record-review requires session state 'review', current state is '{state}'")
+    if bool(args.ai) == bool(args.file):
+        die("record-review requires exactly one of --ai or --file")
+    if args.file:
+        source = Path(args.file).expanduser()
+        if not source.exists() or not source.is_file():
+            die(f"review file not found: {source}")
+        ai_review = source.read_text().strip()
+    else:
+        ai_review = args.ai.strip()
+    if not ai_review:
+        die("AI review content must not be empty")
+    path = artifact_path(args.session_id)
+    text = read_text(path)
+    review_pass = f"#### Review pass {now()}\n\n{ai_review}"
+    text = append_subsection(text, "Review", "AI Review", review_pass)
+    if args.required_fix:
+        fixes = "\n".join(f"- [ ] {fix.strip()}" for fix in args.required_fix if fix.strip())
+        if fixes:
+            text = append_subsection(text, "Review", "Required Fixes", fixes)
+    path.write_text(text)
+    print(f"recorded AI review: {args.session_id}")
+
+
 def cmd_transition(args: argparse.Namespace) -> None:
     if args.state not in STATES:
         die(f"unknown state: {args.state}")
@@ -1547,6 +1626,13 @@ def build_parser() -> argparse.ArgumentParser:
     approve_review_p.add_argument("session_id")
     approve_review_p.add_argument("--by", required=True)
     approve_review_p.set_defaults(func=cmd_approve_review)
+
+    record_review_p = sub.add_parser("record-review")
+    record_review_p.add_argument("session_id")
+    record_review_p.add_argument("--ai")
+    record_review_p.add_argument("--file")
+    record_review_p.add_argument("--required-fix", action="append", default=[])
+    record_review_p.set_defaults(func=cmd_record_review)
 
     transition_p = sub.add_parser("transition")
     transition_p.add_argument("session_id")

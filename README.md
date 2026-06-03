@@ -151,11 +151,14 @@ After implementation, move to review and stop for human review:
 
 ```bash
 bin/harness transition req-login-timeout review
+bin/harness record-review req-login-timeout --file review.md
 bin/harness approve-review req-login-timeout --by "Liem"
 bin/harness transition req-login-timeout quality-check
 ```
 
 `review -> quality-check` requires explicit human review approval. Agents must not run `approve-review` unless the user explicitly approves the review.
+
+In `review`, agents must persist AI review output with `harness record-review` before responding. A chat-only review is incomplete. AI findings are advisory until the human decides. Use `--required-fix` only for human-selected fixes that must block `review -> quality-check`.
 
 During `implementation`, every item in `## Implementation Checklist` must be checked before review. If product files changed while checklist items remain unchecked, `harness status` and `harness validate` report the missing checklist work.
 

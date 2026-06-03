@@ -1,6 +1,28 @@
 # Review State Guardrails
 
-Run AI review, record human review, and convert required findings into checklist items.
+Run AI review, record findings, and wait for human review.
+
+After running AI review, immediately record it in the artifact before responding:
+
+```bash
+harness record-review <session-id> --file review.md
+```
+
+or:
+
+```bash
+harness record-review <session-id> --ai "No blocking issues."
+```
+
+AI findings are advisory until the human decides. Do not add required fixes just because AI found something.
+
+Only when the user explicitly decides a finding must be fixed, record it as a required fix:
+
+```bash
+harness record-review <session-id> --file review.md --required-fix "Fix validation gap"
+```
+
+A chat-only review is incomplete.
 
 Forbidden:
 
@@ -27,4 +49,5 @@ Before quality-check:
 - `## Implementation Checklist` must be fully checked.
 - `## Review > AI Review` must be filled.
 - `## Review > Human Review` must be filled.
+- `## Review > Required Fixes` must contain only human-selected required fixes.
 - `## Review > Required Fixes` must be `None.` or all required fix checklist items must be resolved through `needs-fix`.
