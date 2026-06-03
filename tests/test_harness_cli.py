@@ -348,6 +348,46 @@ class HarnessCliTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("requires session state 'review'", result.stderr)
 
+    def test_recover_moves_review_to_needs_fix_and_counts_attempts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            artifact = self.enter_review(cwd)
+
+            result = self.run_cli(cwd, "recover", "req-login-timeout", "--reason", "open review item")
+
+            self.assertIn("recovery attempt recorded: 1/3", result.stdout)
+            self.assertIn("transitioned: review -> needs-fix", result.stdout)
+            self.assertIn('status: "needs-fix"', artifact.read_text())
+            self.assertIn('recovery_attempts: "1"', artifact.read_text())
+
+    def test_recover_allows_three_attempts_then_blocks_on_next_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            artifact = self.enter_review(cwd)
+
+            self.run_cli(cwd, "recover", "req-login-timeout", "--reason", "review item 1")
+            self.run_cli(cwd, "recover", "req-login-timeout", "--reason", "review item 2")
+            third = self.run_cli(cwd, "recover", "req-login-timeout", "--reason", "review item 3")
+
+            self.assertIn("recovery attempt recorded: 3/3", third.stdout)
+            self.assertIn('status: "needs-fix"', artifact.read_text())
+
+            blocked = self.run_cli(cwd, "recover", "req-login-timeout", "--reason", "review item 4", check=False)
+
+            self.assertNotEqual(blocked.returncode, 0)
+            self.assertIn("recovery blocked: 3/3 attempts used", blocked.stdout)
+            self.assertIn('status: "blocked"', artifact.read_text())
+
+    def test_recover_moves_quality_check_failure_to_needs_fix(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            artifact = self.enter_quality_check(cwd)
+
+            result = self.run_cli(cwd, "recover", "req-login-timeout", "--reason", "unit test failed")
+
+            self.assertIn("transitioned: quality-check -> needs-fix", result.stdout)
+            self.assertIn('status: "needs-fix"', artifact.read_text())
+
     def test_implementation_reports_quality_evidence_recorded_too_early(self):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)

@@ -21,6 +21,7 @@ Required:
 - Do not summarize implementation as complete while any implementation checklist item remains unchecked.
 - Transition to `review` only after every implementation checklist item is checked.
 - Do not run validation plan commands, browser validation, screenshots, or proof attachment in `implementation`.
+- If build or unit tests fail during implementation, run `harness recover <session-id> --reason "unit test failed: <summary>"` and fix from `needs-fix`.
 
 Forbidden:
 

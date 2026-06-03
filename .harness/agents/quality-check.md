@@ -21,7 +21,7 @@ Forbidden:
 Failed validation goes through:
 
 ```bash
-harness transition <session-id> needs-fix
+harness recover <session-id> --reason "quality check failed: <summary>"
 ```
 
 Manual auth blockers require human validation notes, but quality-check still needs at least one attached proof file under `proof/`.
