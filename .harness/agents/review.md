@@ -32,7 +32,7 @@ Forbidden:
 Required fixes go through:
 
 ```bash
-harness transition <session-id> needs-fix
+harness recover <session-id> --reason "open review item: <summary>"
 ```
 
 Quality-check requires explicit human approval:

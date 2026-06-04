@@ -8,6 +8,7 @@ states:
   - review
   - needs-fix
   - quality-check
+  - blocked
   - done
 initial_state: start
 quality_gate:

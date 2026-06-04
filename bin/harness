@@ -14,14 +14,16 @@ import sys
 from pathlib import Path
 
 
-STATES = ["start", "planning", "implementation", "review", "needs-fix", "quality-check", "done"]
+MAX_RECOVERY_ATTEMPTS = 3
+STATES = ["start", "planning", "implementation", "review", "needs-fix", "quality-check", "blocked", "done"]
 TRANSITIONS = {
     "start": {"planning"},
     "planning": {"implementation"},
-    "implementation": {"review"},
+    "implementation": {"review", "needs-fix"},
     "review": {"quality-check", "needs-fix"},
-    "needs-fix": {"implementation"},
+    "needs-fix": {"implementation", "blocked"},
     "quality-check": {"done", "needs-fix"},
+    "blocked": {"planning", "implementation", "quality-check", "done"},
     "done": set(),
 }
 
@@ -113,6 +115,7 @@ states:
   - review
   - needs-fix
   - quality-check
+  - blocked
   - done
 initial_state: start
 quality_gate:
@@ -135,6 +138,7 @@ planning_approved_hash: ""
 review_approved: "false"
 review_approved_by: ""
 review_approved_at: ""
+recovery_attempts: "0"
 created_at: "{{CREATED_AT}}"
 updated_at: "{{UPDATED_AT}}"
 ---
@@ -355,7 +359,18 @@ Product code edits are forbidden in:
 - `planning`
 - `review`
 - `quality-check`
+- `blocked`
 - `done`
+
+## Auto Recovery
+
+When implementation, review, or quality-check fails, use:
+
+```bash
+harness recover <session-id> --reason "what failed"
+```
+
+This increments `recovery_attempts` and transitions to `needs-fix`. After 3 recovery attempts, the next recovery request transitions to `blocked` and stops automation.
 """,
         "start.md": """# Start State Guardrails
 
@@ -445,6 +460,7 @@ Required:
 - Do not summarize implementation as complete while any implementation checklist item remains unchecked.
 - Transition to `review` only after every implementation checklist item is checked.
 - Do not run validation plan commands, browser validation, screenshots, or proof attachment in `implementation`.
+- If build or unit tests fail during implementation, run `harness recover <session-id> --reason "unit test failed: <summary>"` and fix from `needs-fix`.
 
 Forbidden:
 
@@ -487,7 +503,7 @@ Forbidden:
 Required fixes go through:
 
 ```bash
-harness transition <session-id> needs-fix
+harness recover <session-id> --reason "open review item: <summary>"
 ```
 
 Quality-check requires explicit human approval:
@@ -530,7 +546,7 @@ Forbidden:
 Failed validation goes through:
 
 ```bash
-harness transition <session-id> needs-fix
+harness recover <session-id> --reason "quality check failed: <summary>"
 ```
 
 Manual auth blockers require human validation notes, but quality-check still needs at least one attached proof file under `proof/`.
@@ -552,6 +568,32 @@ Forbidden:
 - product code edits
 - new acceptance criteria
 - new scope
+""",
+        "blocked.md": """# Blocked State Guardrails
+
+Automation stopped after the recovery attempt limit or an external blocker.
+
+Allowed:
+
+- inspect the blocker report
+- clarify requirements
+- fix environment or dependency blockers
+- record the human decision in the artifact
+- transition back with `harness transition`
+
+Forbidden:
+
+- product code edits before transitioning back to `implementation`
+- bypassing the blocked decision by editing artifact status manually
+
+Common exits:
+
+```bash
+harness transition <session-id> planning
+harness transition <session-id> implementation
+harness transition <session-id> quality-check
+harness transition <session-id> done
+```
 """,
     }
 
@@ -575,7 +617,7 @@ For harness work, these rules are mandatory.
 
 Project map rule: `.harness/project/` is orientation only. Current code wins; verify relevant facts before planning or editing.
 
-If the artifact status is `start`, `planning`, `review`, `quality-check`, or `done`, product code edits are forbidden.
+If the artifact status is `start`, `planning`, `review`, `quality-check`, `blocked`, or `done`, product code edits are forbidden.
 
 If preflight blocks, stop and report the blocker.
 """
@@ -661,6 +703,7 @@ def dump_frontmatter(data: dict[str, str], body: str) -> str:
         "review_approved",
         "review_approved_by",
         "review_approved_at",
+        "recovery_attempts",
         "created_at",
         "updated_at",
     ]
@@ -682,6 +725,19 @@ def update_artifact_meta(session_id: str, updates: dict[str, str]) -> None:
     data.update(updates)
     data["updated_at"] = now()
     path.write_text(dump_frontmatter(data, body))
+
+
+def recovery_attempts(session_id: str) -> int:
+    raw = artifact_meta(session_id).get("recovery_attempts", "0")
+    try:
+        value = int(raw)
+    except ValueError:
+        return 0
+    return max(value, 0)
+
+
+def set_recovery_attempts(session_id: str, attempts: int) -> None:
+    update_artifact_meta(session_id, {"recovery_attempts": str(max(attempts, 0))})
 
 
 def db() -> sqlite3.Connection:
@@ -1064,9 +1120,10 @@ def next_action_for_state(state: str) -> str:
         "start": "transition to planning",
         "planning": "fill planning artifact sections, get human planning approval, then transition to implementation",
         "implementation": "finish code, check every implementation checklist item, then transition to review; do not run quality validation here",
-        "needs-fix": "fix required items, check implementation checklist items, then transition to implementation/review",
+        "needs-fix": "fix required items, check implementation checklist items, then transition to implementation",
         "review": "record AI/human review, get human review approval, then transition to quality-check",
         "quality-check": "execute validation plan, attach proof files, then transition to done",
+        "blocked": "record human decision, then transition to planning/implementation/quality-check/done",
         "done": "no next action",
     }.get(state, "unknown")
 
@@ -1327,6 +1384,7 @@ def cmd_status(args: argparse.Namespace) -> None:
     print(f"Common guardrail: {agents_dir() / 'common.md'}")
     print(f"State guardrail: {agents_dir() / (state + '.md')}")
     print(f"Next action: {next_action_for_state(state)}")
+    print(f"Recovery attempts: {recovery_attempts(args.session_id)}/{MAX_RECOVERY_ATTEMPTS}")
     if state in {"implementation", "needs-fix"}:
         print("Edit gate: allowed")
     else:
@@ -1489,8 +1547,38 @@ def cmd_transition(args: argparse.Namespace) -> None:
                 print(f"- {path}")
             raise SystemExit(1)
     set_session_state(args.session_id, args.state)
+    if args.state == "done":
+        set_recovery_attempts(args.session_id, 0)
     record_transition(args.session_id, state, args.state, "success")
     print(f"transitioned: {state} -> {args.state}")
+
+
+def cmd_recover(args: argparse.Namespace) -> None:
+    state = current_state(args.session_id)
+    if state not in {"implementation", "review", "quality-check", "needs-fix"}:
+        die(f"recover requires session state implementation, review, quality-check, or needs-fix; current state is '{state}'")
+    reason = args.reason.strip()
+    if not reason:
+        die("recover requires a non-empty --reason")
+    attempts = recovery_attempts(args.session_id)
+    if attempts >= MAX_RECOVERY_ATTEMPTS:
+        if state != "blocked":
+            set_session_state(args.session_id, "blocked")
+            record_transition(args.session_id, state, "blocked", "blocked", reason)
+        print(f"recovery blocked: {attempts}/{MAX_RECOVERY_ATTEMPTS} attempts used")
+        print(f"reason: {reason}")
+        raise SystemExit(1)
+    attempts += 1
+    set_recovery_attempts(args.session_id, attempts)
+    if state == "needs-fix":
+        record_transition(args.session_id, state, state, "recovery", reason)
+        print(f"recovery attempt recorded: {attempts}/{MAX_RECOVERY_ATTEMPTS}")
+        print("state remains: needs-fix")
+        return
+    set_session_state(args.session_id, "needs-fix")
+    record_transition(args.session_id, state, "needs-fix", "recovery", reason)
+    print(f"recovery attempt recorded: {attempts}/{MAX_RECOVERY_ATTEMPTS}")
+    print(f"transitioned: {state} -> needs-fix")
 
 
 def cmd_attach_proof(args: argparse.Namespace) -> None:
@@ -1632,6 +1720,11 @@ def build_parser() -> argparse.ArgumentParser:
     transition_p.add_argument("session_id")
     transition_p.add_argument("state")
     transition_p.set_defaults(func=cmd_transition)
+
+    recover_p = sub.add_parser("recover")
+    recover_p.add_argument("session_id")
+    recover_p.add_argument("--reason", required=True)
+    recover_p.set_defaults(func=cmd_recover)
 
     proof_p = sub.add_parser("attach-proof")
     proof_p.add_argument("session_id")

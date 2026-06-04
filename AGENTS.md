@@ -16,6 +16,6 @@ For harness work, these rules are mandatory.
 
 Project map rule: `.harness/project/` is orientation only. Current code wins; verify relevant facts before planning or editing.
 
-If the artifact status is `start`, `planning`, `review`, `quality-check`, or `done`, product code edits are forbidden.
+If the artifact status is `start`, `planning`, `review`, `quality-check`, `blocked`, or `done`, product code edits are forbidden.
 
 If preflight blocks, stop and report the blocker.

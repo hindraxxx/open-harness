@@ -43,4 +43,15 @@ Product code edits are forbidden in:
 - `planning`
 - `review`
 - `quality-check`
+- `blocked`
 - `done`
+
+## Auto Recovery
+
+When implementation, review, or quality-check fails, use:
+
+```bash
+harness recover <session-id> --reason "what failed"
+```
+
+This increments `recovery_attempts` and transitions to `needs-fix`. After 3 recovery attempts, the next recovery request transitions to `blocked` and stops automation.

@@ -8,6 +8,7 @@ planning_approved_hash: ""
 review_approved: "false"
 review_approved_by: ""
 review_approved_at: ""
+recovery_attempts: "0"
 created_at: "{{CREATED_AT}}"
 updated_at: "{{UPDATED_AT}}"
 ---
