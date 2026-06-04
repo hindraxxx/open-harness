@@ -37,6 +37,16 @@ class HarnessCliTest(unittest.TestCase):
             self.fail(f"command failed: {args}\nstdout={result.stdout}\nstderr={result.stderr}")
         return result
 
+    def with_guidance(self, text: str) -> str:
+        guidance = "\n".join(
+            [
+                "Expected location: inspect the module named by the requirement before editing.",
+                "Pseudocode: preserve existing successful flow and apply the scoped behavior change only.",
+                "Invariants: do not change unrelated routes, validation, persistence, or views unless verification proves they depend on the change.",
+            ]
+        )
+        return text.replace("## Implementation Guidance\n\nTBD", f"## Implementation Guidance\n\n{guidance}", 1)
+
     def enter_quality_check(self, cwd: Path, validation_item: str = "Run validation") -> Path:
         self.run_cli(cwd, "init")
         self.run_cli(cwd, "start", "req-login-timeout")
@@ -48,7 +58,7 @@ class HarnessCliTest(unittest.TestCase):
         text = text.replace("- [ ] TBD", "- [x] Implementation complete", 1)
         text = text.replace("### AI Review\n\nTBD", "### AI Review\n\nNo blocking issues.")
         text = text.replace("### Human Review\n\nTBD", "### Human Review\n\nLooks correct.")
-        artifact.write_text(text)
+        artifact.write_text(self.with_guidance(text))
         self.run_cli(cwd, "transition", "req-login-timeout", "planning")
         self.run_cli(cwd, "approve-planning", "req-login-timeout", "--by", "Liem")
         self.run_cli(cwd, "transition", "req-login-timeout", "implementation")
@@ -66,7 +76,7 @@ class HarnessCliTest(unittest.TestCase):
         text = text.replace("- [ ] TBD", "- [x] Acceptance exists", 1)
         text = text.replace("- [ ] TBD", "- [x] Run validation", 1)
         text = text.replace("- [ ] TBD", "- [x] Implementation complete", 1)
-        artifact.write_text(text)
+        artifact.write_text(self.with_guidance(text))
         self.run_cli(cwd, "transition", "req-login-timeout", "planning")
         self.run_cli(cwd, "approve-planning", "req-login-timeout", "--by", "Liem")
         self.run_cli(cwd, "transition", "req-login-timeout", "implementation")
@@ -97,6 +107,7 @@ class HarnessCliTest(unittest.TestCase):
             self.assertTrue((artifact.parent / "proof").is_dir())
             text = artifact.read_text()
             self.assertIn('session_id: "req-login-timeout"', text)
+            self.assertIn("## Implementation Guidance", text)
             self.assertNotIn("linear_issue_key", text)
             with sqlite3.connect(cwd / ".harness" / "harness.db") as conn:
                 row = conn.execute("SELECT state FROM sessions WHERE session_id = ?", ("req-login-timeout",)).fetchone()
@@ -149,7 +160,7 @@ class HarnessCliTest(unittest.TestCase):
             text = text.replace("TBD", "Download Neraca as Excel", 1)
             text = text.replace("TBD", "Given user exports Neraca, file downloads successfully", 1)
             text = text.replace("TBD", "Run controller unit test", 1)
-            artifact.write_text(text)
+            artifact.write_text(self.with_guidance(text))
 
             self.run_cli(cwd, "transition", "req-login-timeout", "planning")
             blocked = self.run_cli(cwd, "transition", "req-login-timeout", "implementation", check=False)
@@ -181,6 +192,7 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("Requirement Summary must be filled", result.stdout)
             self.assertIn("Acceptance Criteria must be filled", result.stdout)
             self.assertIn("Validation Plan must be filled", result.stdout)
+            self.assertIn("Implementation Guidance must be filled", result.stdout)
             self.assertIn("Implementation Checklist must be filled", result.stdout)
 
     def test_approve_planning_blocks_when_artifact_not_filled(self):
@@ -194,6 +206,7 @@ class HarnessCliTest(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("planning approval blocked", result.stdout)
+            self.assertIn("Implementation Guidance must be filled", result.stdout)
             self.assertIn("Implementation Checklist must be filled", result.stdout)
 
     def test_planning_changes_after_approval_block_preflight(self):
@@ -207,7 +220,7 @@ class HarnessCliTest(unittest.TestCase):
             text = text.replace("- [ ] TBD", "- [ ] Acceptance exists", 1)
             text = text.replace("- [ ] TBD", "- [ ] Validation exists", 1)
             text = text.replace("- [ ] TBD", "- [x] Implementation complete", 1)
-            artifact.write_text(text)
+            artifact.write_text(self.with_guidance(text))
 
             self.run_cli(cwd, "transition", "req-login-timeout", "planning")
             self.run_cli(cwd, "approve-planning", "req-login-timeout", "--by", "Liem")
@@ -230,7 +243,7 @@ class HarnessCliTest(unittest.TestCase):
             text = text.replace("- [ ] TBD", "- [ ] Acceptance exists", 1)
             text = text.replace("- [ ] TBD", "- [ ] Validation exists", 1)
             text = text.replace("- [ ] TBD", "- [ ] Implementation task", 1)
-            artifact.write_text(text)
+            artifact.write_text(self.with_guidance(text))
 
             self.run_cli(cwd, "transition", "req-login-timeout", "planning")
             self.run_cli(cwd, "approve-planning", "req-login-timeout", "--by", "Liem")
@@ -252,7 +265,7 @@ class HarnessCliTest(unittest.TestCase):
             text = text.replace("- [ ] TBD", "- [ ] Acceptance exists", 1)
             text = text.replace("- [ ] TBD", "- [ ] Validation exists", 1)
             text = text.replace("- [ ] TBD", "- [ ] Implementation task", 1)
-            artifact.write_text(text)
+            artifact.write_text(self.with_guidance(text))
 
             self.run_cli(cwd, "transition", "req-login-timeout", "planning")
             self.run_cli(cwd, "approve-planning", "req-login-timeout", "--by", "Liem")
@@ -274,7 +287,7 @@ class HarnessCliTest(unittest.TestCase):
             text = text.replace("- [ ] TBD", "- [ ] Acceptance exists", 1)
             text = text.replace("- [ ] TBD", "- [ ] Validation exists", 1)
             text = text.replace("- [ ] TBD", "- [x] Done task\n- [ ] Undone task", 1)
-            artifact.write_text(text)
+            artifact.write_text(self.with_guidance(text))
 
             self.run_cli(cwd, "transition", "req-login-timeout", "planning")
             self.run_cli(cwd, "approve-planning", "req-login-timeout", "--by", "Liem")
@@ -399,7 +412,7 @@ class HarnessCliTest(unittest.TestCase):
             text = text.replace("- [ ] TBD", "- [ ] Acceptance exists", 1)
             text = text.replace("- [ ] TBD", "- [ ] Validation exists", 1)
             text = text.replace("- [ ] TBD", "- [x] Implementation task", 1)
-            artifact.write_text(text)
+            artifact.write_text(self.with_guidance(text))
 
             self.run_cli(cwd, "transition", "req-login-timeout", "planning")
             self.run_cli(cwd, "approve-planning", "req-login-timeout", "--by", "Liem")
@@ -421,7 +434,7 @@ class HarnessCliTest(unittest.TestCase):
             text = text.replace("- [ ] TBD", "- [ ] Acceptance exists", 1)
             text = text.replace("- [ ] TBD", "- [ ] Validation exists", 1)
             text = text.replace("- [ ] TBD", "- [x] Implementation complete", 1)
-            artifact.write_text(text)
+            artifact.write_text(self.with_guidance(text))
 
             self.run_cli(cwd, "transition", "req-login-timeout", "planning")
             self.run_cli(cwd, "approve-planning", "req-login-timeout", "--by", "Liem")
@@ -431,7 +444,7 @@ class HarnessCliTest(unittest.TestCase):
             text = artifact.read_text()
             text = text.replace("### AI Review\n\nTBD", "### AI Review\n\nNo blocking issues.")
             text = text.replace("### Human Review\n\nTBD", "### Human Review\n\nLooks correct.")
-            artifact.write_text(text)
+            artifact.write_text(self.with_guidance(text))
 
             blocked = self.run_cli(cwd, "transition", "req-login-timeout", "quality-check", check=False)
             self.assertNotEqual(blocked.returncode, 0)
@@ -454,7 +467,7 @@ class HarnessCliTest(unittest.TestCase):
             text = text.replace("- [ ] TBD", "- [ ] Acceptance exists", 1)
             text = text.replace("- [ ] TBD", "- [ ] Run build", 1)
             text = text.replace("- [ ] TBD", "- [x] Implementation complete", 1)
-            artifact.write_text(text)
+            artifact.write_text(self.with_guidance(text))
 
             self.run_cli(cwd, "transition", "req-login-timeout", "planning")
             self.run_cli(cwd, "approve-planning", "req-login-timeout", "--by", "Liem")
@@ -463,7 +476,7 @@ class HarnessCliTest(unittest.TestCase):
             text = artifact.read_text()
             text = text.replace("### AI Review\n\nTBD", "### AI Review\n\nNo blocking issues.")
             text = text.replace("### Human Review\n\nTBD", "### Human Review\n\nLooks correct.")
-            artifact.write_text(text)
+            artifact.write_text(self.with_guidance(text))
             self.run_cli(cwd, "approve-review", "req-login-timeout", "--by", "Liem")
             self.run_cli(cwd, "transition", "req-login-timeout", "quality-check")
 
@@ -509,7 +522,10 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("preflight-edit", (cwd / "AGENTS.md").read_text())
             self.assertIn("Implementation State Guardrails", (cwd / ".harness" / "agents" / "implementation.md").read_text())
             self.assertIn(".harness/project/index.md", (cwd / "AGENTS.md").read_text())
-            self.assertIn("Read `.harness/project/index.md`", (cwd / ".harness" / "agents" / "planning.md").read_text())
+            planning_text = (cwd / ".harness" / "agents" / "planning.md").read_text()
+            self.assertIn("Read `.harness/project/index.md`", planning_text)
+            self.assertIn("lower-capability implementation agent", planning_text)
+            self.assertIn("sample function shape, or pseudocode", planning_text)
 
     def test_init_project_map_creates_missing_files_without_overwrite(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -564,7 +580,7 @@ class HarnessCliTest(unittest.TestCase):
             self.run_cli(cwd, "attach-proof", "req-login-timeout", str(proof))
             text = artifact.read_text()
             text = text.replace("### Commands Run\n\nTBD", "### Commands Run\n\n- php artisan test: PASS")
-            artifact.write_text(text)
+            artifact.write_text(self.with_guidance(text))
 
             result = self.run_cli(cwd, "validate", "req-login-timeout", check=False)
 
@@ -577,7 +593,7 @@ class HarnessCliTest(unittest.TestCase):
                 "### Commands Run\n\n- php artisan test: PASS",
                 "### Commands Run\n\n- curl -i http://localhost/api/neraca\n- Sample response: HTTP/1.1 200 OK {\"ok\":true}",
             )
-            artifact.write_text(text)
+            artifact.write_text(self.with_guidance(text))
             self.assertEqual(0, self.run_cli(cwd, "validate", "req-login-timeout").returncode)
 
     def test_frontend_quality_gate_requires_screenshot_and_view_validation(self):
@@ -591,7 +607,7 @@ class HarnessCliTest(unittest.TestCase):
             self.run_cli(cwd, "attach-proof", "req-login-timeout", str(proof))
             text = artifact.read_text()
             text = text.replace("### Commands Run\n\nTBD", "### Commands Run\n\n- npm test: PASS")
-            artifact.write_text(text)
+            artifact.write_text(self.with_guidance(text))
 
             result = self.run_cli(cwd, "validate", "req-login-timeout", check=False)
 
@@ -604,7 +620,7 @@ class HarnessCliTest(unittest.TestCase):
             self.run_cli(cwd, "attach-proof", "req-login-timeout", str(screenshot))
             text = artifact.read_text()
             text = text.replace("### Manual Validation\n\nTBD", "### Manual Validation\n\nView validated in browser.")
-            artifact.write_text(text)
+            artifact.write_text(self.with_guidance(text))
             self.assertEqual(0, self.run_cli(cwd, "validate", "req-login-timeout").returncode)
 
     def test_both_quality_gate_requires_backend_and_frontend_proof(self):
@@ -622,7 +638,7 @@ class HarnessCliTest(unittest.TestCase):
                 "### Commands Run\n\n- curl -i http://localhost/api/neraca\n- Sample response: status 200",
             )
             text = text.replace("### Manual Validation\n\nTBD", "### Manual Validation\n\nView validated in browser.")
-            artifact.write_text(text)
+            artifact.write_text(self.with_guidance(text))
 
             self.assertEqual(0, self.run_cli(cwd, "validate", "req-login-timeout").returncode)
 
@@ -745,7 +761,7 @@ class HarnessCliTest(unittest.TestCase):
             text = text.replace("### AI Review\n\nTBD", "### AI Review\n\nNo blocking issues.")
             text = text.replace("### Human Review\n\nTBD", "### Human Review\n\nLooks correct.")
             text = text.replace("## Final Approval\n\nTBD", "## Final Approval\n\nApproved.")
-            artifact.write_text(text)
+            artifact.write_text(self.with_guidance(text))
 
             self.run_cli(cwd, "transition", "req-login-timeout", "planning")
             self.run_cli(cwd, "approve-planning", "req-login-timeout", "--by", "Liem")
@@ -756,7 +772,7 @@ class HarnessCliTest(unittest.TestCase):
             text = artifact.read_text()
             text = text.replace("### Commands Run\n\nTBD", "### Commands Run\n\n- build ok")
             text = text.replace("### Proof\n\n- [ ] TBD", "### Proof\n\n- [x] [missing.pdf](proof/missing.pdf)")
-            artifact.write_text(text)
+            artifact.write_text(self.with_guidance(text))
             result = self.run_cli(cwd, "transition", "req-login-timeout", "done", check=False)
 
             self.assertNotEqual(result.returncode, 0)

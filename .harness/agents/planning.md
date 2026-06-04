@@ -1,6 +1,6 @@
 # Planning State Guardrails
 
-Explore first. Ask blocking ambiguity questions. Write acceptance criteria, validation plan, and implementation checklist.
+Explore first. Ask blocking ambiguity questions. Write acceptance criteria, validation plan, implementation guidance, and implementation checklist.
 
 Allowed:
 
@@ -35,12 +35,20 @@ Before filling the session artifact:
 1. Read `.harness/project/index.md` if present.
 2. Verify relevant project-map facts by repo search or file inspection.
 3. Update stale or missing project-map sections with verified facts.
-4. Then fill `## Requirement Summary`, `## Acceptance Criteria`, `## Validation Plan`, and `## Implementation Checklist`.
+4. Then fill `## Requirement Summary`, `## Acceptance Criteria`, `## Validation Plan`, `## Implementation Guidance`, and `## Implementation Checklist`.
 
 Planning must include real checklist items in:
 
 - `## Acceptance Criteria`
 - `## Validation Plan`
 - `## Implementation Checklist`
+
+`## Implementation Guidance` must be detailed enough for a lower-capability implementation agent to execute without re-planning. Include:
+
+- expected file/function/module locations discovered during exploration
+- current behavior to change or preserve
+- desired control flow, sample function shape, or pseudocode when useful
+- invariants and out-of-scope areas that must not be changed
+- concrete data cases or examples the implementer should verify
 
 Do not transition to implementation with placeholder `TBD` checklist items.

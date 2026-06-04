@@ -157,6 +157,10 @@ TBD
 
 - [ ] TBD
 
+## Implementation Guidance
+
+TBD
+
 ## Implementation Checklist
 
 - [ ] TBD
@@ -392,7 +396,7 @@ Before any code edit, transition to `planning`, complete planning, then transiti
 """,
         "planning.md": """# Planning State Guardrails
 
-Explore first. Ask blocking ambiguity questions. Write acceptance criteria, validation plan, and implementation checklist.
+Explore first. Ask blocking ambiguity questions. Write acceptance criteria, validation plan, implementation guidance, and implementation checklist.
 
 Allowed:
 
@@ -427,13 +431,21 @@ Before filling the session artifact:
 1. Read `.harness/project/index.md` if present.
 2. Verify relevant project-map facts by repo search or file inspection.
 3. Update stale or missing project-map sections with verified facts.
-4. Then fill `## Requirement Summary`, `## Acceptance Criteria`, `## Validation Plan`, and `## Implementation Checklist`.
+4. Then fill `## Requirement Summary`, `## Acceptance Criteria`, `## Validation Plan`, `## Implementation Guidance`, and `## Implementation Checklist`.
 
 Planning must include real checklist items in:
 
 - `## Acceptance Criteria`
 - `## Validation Plan`
 - `## Implementation Checklist`
+
+`## Implementation Guidance` must be detailed enough for a lower-capability implementation agent to execute without re-planning. Include:
+
+- expected file/function/module locations discovered during exploration
+- current behavior to change or preserve
+- desired control flow, sample function shape, or pseudocode when useful
+- invariants and out-of-scope areas that must not be changed
+- concrete data cases or examples the implementer should verify
 
 Do not transition to implementation with placeholder `TBD` checklist items.
 """,
@@ -1051,6 +1063,8 @@ def planning_snapshot(text: str) -> str:
         section(text, "Acceptance Criteria"),
         "Validation Plan",
         section(text, "Validation Plan"),
+        "Implementation Guidance",
+        section(text, "Implementation Guidance"),
     ]
     normalized = "\n".join(part.strip() for part in parts)
     normalized = re.sub(r"[ \t]+", " ", normalized)
@@ -1225,6 +1239,7 @@ def validate_requirements(
     if check_state in {"planning", "implementation", "review", "quality-check", "done"}:
         acceptance_criteria = section(text, "Acceptance Criteria")
         validation_plan = section(text, "Validation Plan")
+        implementation_guidance = section(text, "Implementation Guidance")
         implementation_checklist = section(text, "Implementation Checklist")
         if not has_real_content(acceptance_criteria):
             missing.append("Acceptance Criteria must be filled")
@@ -1234,6 +1249,8 @@ def validate_requirements(
             missing.append("Validation Plan must be filled")
         if not has_any_checklist_item(validation_plan):
             missing.append("Validation Plan must contain checklist items")
+        if not has_real_content(implementation_guidance):
+            missing.append("Implementation Guidance must be filled")
         if not has_real_content(implementation_checklist):
             missing.append("Implementation Checklist must be filled")
         if not has_any_checklist_item(implementation_checklist):
