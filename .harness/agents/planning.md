@@ -47,7 +47,9 @@ Planning must include real checklist items in:
 
 - expected file/function/module locations discovered during exploration
 - current behavior to change or preserve
-- desired control flow, sample function shape, or pseudocode when useful
+- a mandatory `### Implementation Sketch` subsection containing pseudocode, a sample function shape, or concrete code-shape steps the implementation agent can follow directly
+- a mandatory `### Decision Table` subsection mapping each important branch/input state to the expected behavior, metric, return value, or side effect
+- a mandatory `### Code Anchors` subsection naming the exact existing variables, conditions, helper functions, or call sites the implementation must use for key decisions
 - invariants and out-of-scope areas that must not be changed
 - concrete data cases or examples the implementer should verify
 

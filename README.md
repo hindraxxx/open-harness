@@ -81,7 +81,9 @@ bin/harness transition req-login-timeout implementation
 
 `planning -> implementation` requires explicit planning approval. Agents must not run `approve-planning` unless the user explicitly approves the plan.
 
-`approve-planning` marks `## Acceptance Criteria` items checked as requirement approval, then locks a hash of Requirement Summary, Acceptance Criteria, and Validation Plan. If those planning sections change after approval, implementation/edit gates block until planning is approved again. Validation Plan and Implementation Checklist remain execution checklists; checking implementation items during implementation does not invalidate planning approval.
+`approve-planning` marks `## Acceptance Criteria` items checked as requirement approval, then locks a hash of Requirement Summary, Acceptance Criteria, Validation Plan, and Implementation Guidance. If those planning sections change after approval, implementation/edit gates block until planning is approved again. Validation Plan and Implementation Checklist remain execution checklists; checking implementation items during implementation does not invalidate planning approval.
+
+Planning must include concrete handoff details inside `## Implementation Guidance`: a `### Implementation Sketch` with pseudocode, sample function shape, or code-shape steps; a `### Decision Table` mapping important branches or input states to expected behavior; and `### Code Anchors` naming exact existing variables, conditions, helpers, or call sites. This is intentionally required so lower-capability implementation agents can execute the approved approach directly instead of re-planning.
 
 After implementation, move to review and stop for human review:
 
@@ -101,6 +103,16 @@ During `implementation`, every item in `## Implementation Checklist` must be che
 Implementation must not run quality validation. If `## Quality Check` commands/proof/manual validation are recorded before the session reaches `quality-check`, `harness status` and `harness validate` report a phase violation.
 
 Inside `quality-check`, the agent must execute the artifact `## Validation Plan`, check off completed validation items, record commands/results under `## Quality Check > Commands Run`, and attach proof with `harness attach-proof`. `harness status` and `harness validate` report missing quality evidence until a checked proof link resolves to a file under the session `proof/` directory.
+
+After quality evidence is complete, transition to `approval` and stop for human quality approval:
+
+```bash
+bin/harness transition req-login-timeout approval
+bin/harness approve-quality req-login-timeout --by "Liem"
+bin/harness transition req-login-timeout done
+```
+
+`quality-check -> approval` requires validation execution, recorded commands/results, and attached proof. `approval -> done` requires explicit human quality approval. Agents must not run `approve-quality` unless the user explicitly approves the quality evidence. If quality evidence is rejected and recovery goes through `needs-fix`, prior quality approval is cleared and `## Final Approval` returns to `TBD`.
 
 Quality proof policy is configured in `.harness/harness.yml`:
 
@@ -128,6 +140,8 @@ Check local harness integrity:
 ```bash
 bin/harness doctor
 ```
+
+If the harness scaffold exists but the local SQLite DB has not been created yet, `doctor` initializes `.harness/harness.db` before running integrity checks.
 
 Migrate existing Markdown-only sessions into SQLite:
 
@@ -197,8 +211,9 @@ Tell an agent the session id. The agent should:
 3. Read `.harness/agents/common.md`.
 4. Read `.harness/project/index.md` when present.
 5. Read the state guardrail printed by status.
-6. Run `bin/harness preflight-edit <session-id>` before product code edits.
-7. Work within that state only.
+6. In `implementation`, read `## Implementation Guidance` and follow `### Implementation Sketch`, `### Decision Table`, and `### Code Anchors` before editing.
+7. Run `bin/harness preflight-edit <session-id>` before product code edits.
+8. Work within that state only.
 
 ## Test
 

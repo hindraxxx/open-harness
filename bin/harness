@@ -15,15 +15,16 @@ from pathlib import Path
 
 
 MAX_RECOVERY_ATTEMPTS = 3
-STATES = ["start", "planning", "implementation", "review", "needs-fix", "quality-check", "blocked", "done"]
+STATES = ["start", "planning", "implementation", "review", "needs-fix", "quality-check", "approval", "blocked", "done"]
 TRANSITIONS = {
     "start": {"planning"},
     "planning": {"implementation"},
     "implementation": {"review", "needs-fix"},
     "review": {"quality-check", "needs-fix"},
     "needs-fix": {"implementation", "blocked"},
-    "quality-check": {"done", "needs-fix"},
-    "blocked": {"planning", "implementation", "quality-check", "done"},
+    "quality-check": {"approval", "needs-fix"},
+    "approval": {"done", "needs-fix"},
+    "blocked": {"planning", "implementation", "quality-check", "approval", "done"},
     "done": set(),
 }
 
@@ -115,6 +116,7 @@ states:
   - review
   - needs-fix
   - quality-check
+  - approval
   - blocked
   - done
 initial_state: start
@@ -138,6 +140,9 @@ planning_approved_hash: ""
 review_approved: "false"
 review_approved_by: ""
 review_approved_at: ""
+quality_approved: "false"
+quality_approved_by: ""
+quality_approved_at: ""
 recovery_attempts: "0"
 created_at: "{{CREATED_AT}}"
 updated_at: "{{UPDATED_AT}}"
@@ -158,6 +163,18 @@ TBD
 - [ ] TBD
 
 ## Implementation Guidance
+
+TBD
+
+### Implementation Sketch
+
+TBD
+
+### Decision Table
+
+TBD
+
+### Code Anchors
 
 TBD
 
@@ -331,7 +348,8 @@ Before doing harness work:
 
 ## Hard Rules
 
-- Treat `.harness/sessions/<session-id>/artifact.md` as canonical.
+- SQLite is canonical for session state, transitions, approvals, and proofs.
+- Markdown artifacts are required for planning, review, quality evidence, and human-readable notes.
 - Use `harness transition` for phase changes.
 - Never bypass CLI transition guards by editing artifact status manually.
 - Never edit approval metadata or hashes manually.
@@ -348,7 +366,8 @@ Before doing harness work:
 1. `planning` -> `implementation`: requires filled requirement summary, acceptance criteria checklist, validation plan checklist, implementation checklist, and explicit human planning approval.
 2. `implementation` -> `review`: requires the implementation checklist to be fully checked.
 3. `review` -> `quality-check`: requires AI review, human review, no unresolved required fixes, and explicit human review approval.
-4. `quality-check` -> `done`: requires validation execution, recorded commands, attached proof file under `proof/`, and final approval.
+4. `quality-check` -> `approval`: requires validation execution, recorded commands, and attached proof file under `proof/`.
+5. `approval` -> `done`: requires explicit human quality approval.
 
 ## Edit Gate
 
@@ -363,18 +382,20 @@ Product code edits are forbidden in:
 - `planning`
 - `review`
 - `quality-check`
+- `approval`
 - `blocked`
 - `done`
 
 ## Auto Recovery
 
-When implementation, review, or quality-check fails, use:
+When implementation, review, quality-check, or approval fails, use:
 
 ```bash
 harness recover <session-id> --reason "what failed"
 ```
 
 This increments `recovery_attempts` and transitions to `needs-fix`. After 3 recovery attempts, the next recovery request transitions to `blocked` and stops automation.
+Recovering from `quality-check` or `approval` clears any prior quality approval and resets `## Final Approval` to `TBD`.
 """,
         "start.md": """# Start State Guardrails
 
@@ -443,7 +464,9 @@ Planning must include real checklist items in:
 
 - expected file/function/module locations discovered during exploration
 - current behavior to change or preserve
-- desired control flow, sample function shape, or pseudocode when useful
+- a mandatory `### Implementation Sketch` subsection containing pseudocode, a sample function shape, or concrete code-shape steps the implementation agent can follow directly
+- a mandatory `### Decision Table` subsection mapping each important branch/input state to the expected behavior, metric, return value, or side effect
+- a mandatory `### Code Anchors` subsection naming the exact existing variables, conditions, helper functions, or call sites the implementation must use for key decisions
 - invariants and out-of-scope areas that must not be changed
 - concrete data cases or examples the implementer should verify
 
@@ -452,6 +475,14 @@ Do not transition to implementation with placeholder `TBD` checklist items.
         "implementation.md": """# Implementation State Guardrails
 
 Implement approved artifact checklist items and tests.
+
+Before implementation:
+
+1. Read `## Implementation Guidance`.
+2. Follow the `### Implementation Sketch` as the starting code plan.
+3. Use `### Decision Table` as the source of truth for branch behavior.
+4. Use `### Code Anchors` for the exact existing variables, conditions, helpers, and call sites to modify or preserve.
+5. If the sketch, decision table, or code anchors are missing, ambiguous, or conflict with current code, stop and return to planning instead of re-planning silently.
 
 Before editing product code, run:
 
@@ -547,7 +578,8 @@ On entry:
 3. Mark executed validation items checked in `## Validation Plan`.
 4. Record exact commands and results under `## Quality Check > Commands Run`.
 5. Attach proof with `harness attach-proof <session-id> <file>`.
-6. Run `harness validate <session-id>` before attempting `done`.
+6. Run `harness validate <session-id>`.
+7. Transition to `approval` and stop for human quality approval.
 
 Forbidden:
 
@@ -570,6 +602,38 @@ Proof policy is configured in `.harness/harness.yml`:
 - `frontend`: require screenshot proof and view validation notes.
 - `both`: require backend and frontend proof.
 - `manual`: require generic proof only.
+""",
+        "approval.md": """# Approval State Guardrails
+
+Human quality approval happens after validation proof exists.
+
+On entry:
+
+0. Confirm `harness status <session-id>` shows state `approval` and `Missing: none`.
+1. Present `## Quality Check` commands, proof, and manual validation notes for human review.
+2. Do not transition to `done` until the user explicitly approves the quality evidence.
+3. Only after explicit user approval, run:
+
+```bash
+harness approve-quality <session-id> --by <human-name>
+harness transition <session-id> done
+```
+
+Agents must not run `approve-quality` unless the user explicitly instructs them to approve quality evidence.
+
+Forbidden:
+
+- product code edits while still in approval
+- changing validation output or proof
+- inventing final approval
+
+If quality evidence is rejected, use:
+
+```bash
+harness recover <session-id> --reason "quality approval rejected: <summary>"
+```
+
+Recovery clears quality approval and resets `## Final Approval` to `TBD`.
 """,
         "done.md": """# Done State Guardrails
 
@@ -604,6 +668,7 @@ Common exits:
 harness transition <session-id> planning
 harness transition <session-id> implementation
 harness transition <session-id> quality-check
+harness transition <session-id> approval
 harness transition <session-id> done
 ```
 """,
@@ -629,7 +694,7 @@ For harness work, these rules are mandatory.
 
 Project map rule: `.harness/project/` is orientation only. Current code wins; verify relevant facts before planning or editing.
 
-If the artifact status is `start`, `planning`, `review`, `quality-check`, `blocked`, or `done`, product code edits are forbidden.
+If the artifact status is `start`, `planning`, `review`, `quality-check`, `approval`, `blocked`, or `done`, product code edits are forbidden.
 
 If preflight blocks, stop and report the blocker.
 """
@@ -715,6 +780,9 @@ def dump_frontmatter(data: dict[str, str], body: str) -> str:
         "review_approved",
         "review_approved_by",
         "review_approved_at",
+        "quality_approved",
+        "quality_approved_by",
+        "quality_approved_at",
         "recovery_attempts",
         "created_at",
         "updated_at",
@@ -870,6 +938,26 @@ def insert_approval(session_id: str, approval_type: str, approver: str, approval
         )
 
 
+def clear_quality_approval(session_id: str) -> None:
+    path = artifact_path(session_id)
+    data, body = parse_frontmatter(read_text(path))
+    data.update(
+        {
+            "quality_approved": "false",
+            "quality_approved_by": "",
+            "quality_approved_at": "",
+            "updated_at": now(),
+        }
+    )
+    body = replace_section(body, "Final Approval", "TBD")
+    path.write_text(dump_frontmatter(data, body))
+    with db() as conn:
+        conn.execute(
+            "DELETE FROM approvals WHERE session_id = ? AND approval_type = ?",
+            (session_id, "quality"),
+        )
+
+
 def insert_review_pass(session_id: str, content: str) -> None:
     with db() as conn:
         conn.execute(
@@ -937,6 +1025,8 @@ def migrate_sqlite() -> int:
             insert_approval(session_id, "planning", data.get("planning_approved_by", ""), data.get("planning_approved_hash", ""))
         if data.get("review_approved") == "true":
             insert_approval(session_id, "review", data.get("review_approved_by", ""), "")
+        if data.get("quality_approved") == "true":
+            insert_approval(session_id, "quality", data.get("quality_approved_by", ""), quality_snapshot(read_text(path)))
         migrated += 1
     return migrated
 
@@ -992,6 +1082,39 @@ def has_real_content(value: str) -> bool:
     if lines and all(re.match(r"^-+\s*\[[ xX]\]\s*TBD$", line) for line in lines):
         return False
     return True
+
+
+def has_implementation_sketch(value: str) -> bool:
+    sketch = subsection(value, "Implementation Sketch")
+    if has_real_content(sketch):
+        return True
+    lowered = value.lower()
+    sketch_markers = [
+        "pseudocode:",
+        "pseudo-code:",
+        "code shape:",
+        "sample function",
+        "sample code",
+    ]
+    return "```" in value or any(marker in lowered for marker in sketch_markers)
+
+
+def has_guidance_subsection(value: str, heading: str) -> bool:
+    content = subsection(value, heading)
+    if not has_real_content(content):
+        return False
+    without_placeholders = "\n".join(
+        line for line in content.splitlines() if line.strip() != "TBD"
+    )
+    return has_real_content(without_placeholders)
+
+
+def has_real_implementation_guidance(value: str) -> bool:
+    without_headings = re.sub(r"^### .*$", "", value, flags=re.MULTILINE)
+    without_placeholders = "\n".join(
+        line for line in without_headings.splitlines() if line.strip() != "TBD"
+    )
+    return has_real_content(without_placeholders)
 
 
 def has_checked_item(value: str) -> bool:
@@ -1072,6 +1195,19 @@ def planning_snapshot(text: str) -> str:
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
+def quality_snapshot(text: str) -> str:
+    parts = [
+        "Validation Plan",
+        section(text, "Validation Plan"),
+        "Quality Check",
+        section(text, "Quality Check"),
+    ]
+    normalized = "\n".join(part.strip() for part in parts)
+    normalized = re.sub(r"[ \t]+", " ", normalized)
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized).strip()
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
 def check_section_items(text: str, heading: str) -> str:
     match = re.search(rf"^## {re.escape(heading)}\s*$", text, re.MULTILINE)
     if not match:
@@ -1105,6 +1241,17 @@ def replace_subsection(text: str, section_heading: str, subsection_heading: str,
     return text[:content_start] + replacement + text[content_end:]
 
 
+def replace_section(text: str, heading: str, content: str) -> str:
+    match = re.search(rf"^## {re.escape(heading)}[ \t]*$", text, re.MULTILINE)
+    if not match:
+        return text.rstrip() + f"\n\n## {heading}\n\n{content.strip()}\n"
+    content_start = match.end()
+    remainder = text[content_start:]
+    next_heading = re.search(r"^## ", remainder, re.MULTILINE)
+    content_end = content_start + (next_heading.start() if next_heading else len(remainder))
+    return text[:content_start] + f"\n\n{content.strip()}\n\n" + text[content_end:]
+
+
 def append_subsection(text: str, section_heading: str, subsection_heading: str, content: str) -> str:
     existing = subsection(section(text, section_heading), subsection_heading)
     if has_real_content(existing) and existing.strip() != "None.":
@@ -1136,8 +1283,9 @@ def next_action_for_state(state: str) -> str:
         "implementation": "finish code, check every implementation checklist item, then transition to review; do not run quality validation here",
         "needs-fix": "fix required items, check implementation checklist items, then transition to implementation",
         "review": "record AI/human review, get human review approval, then transition to quality-check",
-        "quality-check": "execute validation plan, attach proof files, then transition to done",
-        "blocked": "record human decision, then transition to planning/implementation/quality-check/done",
+        "quality-check": "execute validation plan, attach proof files, then transition to approval",
+        "approval": "wait for human quality approval, run approve-quality, then transition to done",
+        "blocked": "record human decision, then transition to planning/implementation/quality-check/approval/done",
         "done": "no next action",
     }.get(state, "unknown")
 
@@ -1233,10 +1381,10 @@ def validate_requirements(
     check_state = target or state
     missing = []
 
-    if state not in {"quality-check", "done"} and quality_evidence_present(text):
+    if state not in {"quality-check", "approval", "done"} and quality_evidence_present(text):
         missing.append("Quality Check evidence exists before quality-check state; transition through review before validation")
 
-    if check_state in {"planning", "implementation", "review", "quality-check", "done"}:
+    if check_state in {"planning", "implementation", "review", "quality-check", "approval", "done"}:
         acceptance_criteria = section(text, "Acceptance Criteria")
         validation_plan = section(text, "Validation Plan")
         implementation_guidance = section(text, "Implementation Guidance")
@@ -1249,8 +1397,14 @@ def validate_requirements(
             missing.append("Validation Plan must be filled")
         if not has_any_checklist_item(validation_plan):
             missing.append("Validation Plan must contain checklist items")
-        if not has_real_content(implementation_guidance):
+        if not has_real_implementation_guidance(implementation_guidance):
             missing.append("Implementation Guidance must be filled")
+        elif not has_implementation_sketch(implementation_guidance):
+            missing.append("Implementation Guidance must include an Implementation Sketch with pseudocode or concrete code-shape steps")
+        elif not has_guidance_subsection(implementation_guidance, "Decision Table"):
+            missing.append("Implementation Guidance must include a Decision Table mapping branches to expected behavior")
+        elif not has_guidance_subsection(implementation_guidance, "Code Anchors"):
+            missing.append("Implementation Guidance must include Code Anchors naming exact variables, conditions, helpers, or call sites")
         if not has_real_content(implementation_checklist):
             missing.append("Implementation Checklist must be filled")
         if not has_any_checklist_item(implementation_checklist):
@@ -1260,7 +1414,7 @@ def validate_requirements(
         if not has_real_content(section(text, "Requirement Summary")):
             missing.append("Requirement Summary must be filled")
 
-    if check_state in {"implementation", "review", "quality-check", "done"}:
+    if check_state in {"implementation", "review", "quality-check", "approval", "done"}:
         approval = latest_approval(session_id, "planning")
         if not approval:
             missing.append("Planning must be human-approved with `harness approve-planning <session-id> --by <name>`")
@@ -1271,11 +1425,11 @@ def validate_requirements(
         if non_harness_changes() and has_unchecked_item(implementation_checklist):
             missing.append("Implementation Checklist has unchecked items while product changes exist")
 
-    if check_state in {"review", "quality-check", "done"}:
+    if check_state in {"review", "quality-check", "approval", "done"}:
         if not checklist_complete(implementation_checklist):
             missing.append("Implementation Checklist must be fully checked before review")
 
-    if check_state in {"quality-check", "done"}:
+    if check_state in {"quality-check", "approval", "done"}:
         review = section(text, "Review")
         sync_required_fixes_from_artifact(session_id, text)
         if not has_real_content(subsection(review, "AI Review")):
@@ -1291,10 +1445,15 @@ def validate_requirements(
         quality = section(text, "Quality Check")
         if not proof_links_resolve(session_id, subsection(quality, "Proof")):
             missing.append("Quality Check Proof needs at least one checked proof file under proof/")
+        approval = latest_approval(session_id, "quality")
+        if not approval:
+            missing.append("Quality evidence must be approved with `harness approve-quality <session-id> --by <name>`")
+        elif approval["approval_hash"] != quality_snapshot(text):
+            missing.append("Quality evidence changed after approval; rerun `harness approve-quality <session-id> --by <name>`")
         if not has_real_content(section(text, "Final Approval")):
             missing.append("Final Approval must be recorded")
 
-    if check_state in {"quality-check", "done"} and require_quality_execution:
+    if check_state in {"quality-check", "approval", "done"} and require_quality_execution:
         validation_plan = section(text, "Validation Plan")
         quality = section(text, "Quality Check")
         if has_unchecked_item(validation_plan):
@@ -1505,6 +1664,34 @@ def cmd_approve_review(args: argparse.Namespace) -> None:
     print(f"review approved by {args.by}")
 
 
+def cmd_approve_quality(args: argparse.Namespace) -> None:
+    state = current_state(args.session_id)
+    if state != "approval":
+        die(f"quality approval requires session state 'approval', current state is '{state}'")
+    missing = validate_requirements(args.session_id, "approval")
+    if missing:
+        print("quality approval blocked")
+        for item in missing:
+            print(f"- {item}")
+        raise SystemExit(1)
+    path = artifact_path(args.session_id)
+    text = read_text(path)
+    approval_time = now()
+    approval = f"Approved by {args.by} at {approval_time}."
+    text = replace_section(text, "Final Approval", approval)
+    path.write_text(text)
+    update_artifact_meta(
+        args.session_id,
+        {
+            "quality_approved": "true",
+            "quality_approved_by": args.by,
+            "quality_approved_at": approval_time,
+        },
+    )
+    insert_approval(args.session_id, "quality", args.by, quality_snapshot(read_text(path)))
+    print(f"quality approved by {args.by}")
+
+
 def cmd_record_review(args: argparse.Namespace) -> None:
     state = current_state(args.session_id)
     if state != "review":
@@ -1572,14 +1759,16 @@ def cmd_transition(args: argparse.Namespace) -> None:
 
 def cmd_recover(args: argparse.Namespace) -> None:
     state = current_state(args.session_id)
-    if state not in {"implementation", "review", "quality-check", "needs-fix"}:
-        die(f"recover requires session state implementation, review, quality-check, or needs-fix; current state is '{state}'")
+    if state not in {"implementation", "review", "quality-check", "approval", "needs-fix"}:
+        die(f"recover requires session state implementation, review, quality-check, approval, or needs-fix; current state is '{state}'")
     reason = args.reason.strip()
     if not reason:
         die("recover requires a non-empty --reason")
     attempts = recovery_attempts(args.session_id)
     if attempts >= MAX_RECOVERY_ATTEMPTS:
         if state != "blocked":
+            if state in {"quality-check", "approval"}:
+                clear_quality_approval(args.session_id)
             set_session_state(args.session_id, "blocked")
             record_transition(args.session_id, state, "blocked", "blocked", reason)
         print(f"recovery blocked: {attempts}/{MAX_RECOVERY_ATTEMPTS} attempts used")
@@ -1587,6 +1776,8 @@ def cmd_recover(args: argparse.Namespace) -> None:
         raise SystemExit(1)
     attempts += 1
     set_recovery_attempts(args.session_id, attempts)
+    if state in {"quality-check", "approval"}:
+        clear_quality_approval(args.session_id)
     if state == "needs-fix":
         record_transition(args.session_id, state, state, "recovery", reason)
         print(f"recovery attempt recorded: {attempts}/{MAX_RECOVERY_ATTEMPTS}")
@@ -1645,8 +1836,15 @@ def cmd_migrate_sqlite(_args: argparse.Namespace) -> None:
 def cmd_doctor(_args: argparse.Namespace) -> None:
     issues = []
     if not db_path().exists():
-        issues.append(f"missing SQLite state store: {db_path()}")
-    else:
+        if harness_dir().exists() and template_path().exists() and agents_dir().exists():
+            init_db()
+            migrated = migrate_sqlite()
+            print(f"initialized missing SQLite state store: {db_path()}")
+            if migrated:
+                print(f"migrated sessions: {migrated}")
+        else:
+            issues.append(f"missing SQLite state store: {db_path()}")
+    if not issues:
         try:
             with db() as conn:
                 sessions = conn.execute("SELECT session_id, state, artifact_path FROM sessions ORDER BY session_id").fetchall()
@@ -1725,6 +1923,11 @@ def build_parser() -> argparse.ArgumentParser:
     approve_review_p.add_argument("session_id")
     approve_review_p.add_argument("--by", required=True)
     approve_review_p.set_defaults(func=cmd_approve_review)
+
+    approve_quality_p = sub.add_parser("approve-quality")
+    approve_quality_p.add_argument("session_id")
+    approve_quality_p.add_argument("--by", required=True)
+    approve_quality_p.set_defaults(func=cmd_approve_quality)
 
     record_review_p = sub.add_parser("record-review")
     record_review_p.add_argument("session_id")

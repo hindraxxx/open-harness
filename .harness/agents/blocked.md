@@ -21,5 +21,6 @@ Common exits:
 harness transition <session-id> planning
 harness transition <session-id> implementation
 harness transition <session-id> quality-check
+harness transition <session-id> approval
 harness transition <session-id> done
 ```

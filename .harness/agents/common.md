@@ -11,7 +11,8 @@ Before doing harness work:
 
 ## Hard Rules
 
-- Treat `.harness/sessions/<session-id>/artifact.md` as canonical.
+- SQLite is canonical for session state, transitions, approvals, and proofs.
+- Markdown artifacts are required for planning, review, quality evidence, and human-readable notes.
 - Use `harness transition` for phase changes.
 - Never bypass CLI transition guards by editing artifact status manually.
 - Never edit approval metadata or hashes manually.
@@ -28,7 +29,8 @@ Before doing harness work:
 1. `planning` -> `implementation`: requires filled requirement summary, acceptance criteria checklist, validation plan checklist, implementation checklist, and explicit human planning approval.
 2. `implementation` -> `review`: requires the implementation checklist to be fully checked.
 3. `review` -> `quality-check`: requires AI review, human review, no unresolved required fixes, and explicit human review approval.
-4. `quality-check` -> `done`: requires validation execution, recorded commands, attached proof file under `proof/`, and final approval.
+4. `quality-check` -> `approval`: requires validation execution, recorded commands, and attached proof file under `proof/`.
+5. `approval` -> `done`: requires explicit human quality approval.
 
 ## Edit Gate
 
@@ -43,15 +45,17 @@ Product code edits are forbidden in:
 - `planning`
 - `review`
 - `quality-check`
+- `approval`
 - `blocked`
 - `done`
 
 ## Auto Recovery
 
-When implementation, review, or quality-check fails, use:
+When implementation, review, quality-check, or approval fails, use:
 
 ```bash
 harness recover <session-id> --reason "what failed"
 ```
 
 This increments `recovery_attempts` and transitions to `needs-fix`. After 3 recovery attempts, the next recovery request transitions to `blocked` and stops automation.
+Recovering from `quality-check` or `approval` clears any prior quality approval and resets `## Final Approval` to `TBD`.

@@ -41,11 +41,28 @@ class HarnessCliTest(unittest.TestCase):
         guidance = "\n".join(
             [
                 "Expected location: inspect the module named by the requirement before editing.",
-                "Pseudocode: preserve existing successful flow and apply the scoped behavior change only.",
                 "Invariants: do not change unrelated routes, validation, persistence, or views unless verification proves they depend on the change.",
+                "",
+                "### Implementation Sketch",
+                "",
+                "Pseudocode: preserve existing successful flow and apply the scoped behavior change only.",
+                "",
+                "### Decision Table",
+                "",
+                "| Branch | Expected behavior |",
+                "| --- | --- |",
+                "| Existing successful flow | Apply only the scoped behavior change |",
+                "",
+                "### Code Anchors",
+                "",
+                "- Use the existing module and branch conditions verified during planning.",
             ]
         )
-        return text.replace("## Implementation Guidance\n\nTBD", f"## Implementation Guidance\n\n{guidance}", 1)
+        return text.replace(
+            "## Implementation Guidance\n\nTBD\n\n### Implementation Sketch\n\nTBD\n\n### Decision Table\n\nTBD\n\n### Code Anchors\n\nTBD",
+            f"## Implementation Guidance\n\n{guidance}",
+            1,
+        )
 
     def enter_quality_check(self, cwd: Path, validation_item: str = "Run validation") -> Path:
         self.run_cli(cwd, "init")
@@ -66,6 +83,18 @@ class HarnessCliTest(unittest.TestCase):
         self.run_cli(cwd, "approve-review", "req-login-timeout", "--by", "Liem")
         self.run_cli(cwd, "transition", "req-login-timeout", "quality-check")
         return artifact
+
+    def complete_quality_check(self, cwd: Path, artifact: Path) -> None:
+        proof = cwd / "screenshot.png"
+        proof.write_text("png\n")
+        self.run_cli(cwd, "attach-proof", "req-login-timeout", str(proof))
+        text = artifact.read_text()
+        text = text.replace(
+            "### Commands Run\n\nTBD",
+            "### Commands Run\n\n- curl -i http://localhost/api/neraca\n- Sample response: status 200",
+        )
+        text = text.replace("### Manual Validation\n\nTBD", "### Manual Validation\n\nView validated in browser.")
+        artifact.write_text(self.with_guidance(text))
 
     def enter_review(self, cwd: Path) -> Path:
         self.run_cli(cwd, "init")
@@ -157,10 +186,11 @@ class HarnessCliTest(unittest.TestCase):
             text = text.replace("- [ ] TBD", "- [ ] Acceptance: download flow works", 1)
             text = text.replace("- [ ] TBD", "- [ ] Validate download flow", 1)
             text = text.replace("- [ ] TBD", "- [ ] Implement download flow", 1)
+            text = self.with_guidance(text)
             text = text.replace("TBD", "Download Neraca as Excel", 1)
             text = text.replace("TBD", "Given user exports Neraca, file downloads successfully", 1)
             text = text.replace("TBD", "Run controller unit test", 1)
-            artifact.write_text(self.with_guidance(text))
+            artifact.write_text(text)
 
             self.run_cli(cwd, "transition", "req-login-timeout", "planning")
             blocked = self.run_cli(cwd, "transition", "req-login-timeout", "implementation", check=False)
@@ -208,6 +238,50 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("planning approval blocked", result.stdout)
             self.assertIn("Implementation Guidance must be filled", result.stdout)
             self.assertIn("Implementation Checklist must be filled", result.stdout)
+
+    def test_approve_planning_requires_implementation_sketch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            self.run_cli(cwd, "start", "req-login-timeout")
+            artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
+            text = artifact.read_text()
+            text = text.replace("TBD", "Download Neraca as Excel", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Acceptance exists", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Run validation", 1)
+            text = text.replace("## Implementation Guidance\n\nTBD\n\n### Implementation Sketch\n\nTBD\n\n### Decision Table\n\nTBD\n\n### Code Anchors\n\nTBD", "## Implementation Guidance\n\nUse the existing controller and service style.", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Implement download flow", 1)
+            artifact.write_text(text)
+
+            self.run_cli(cwd, "transition", "req-login-timeout", "planning")
+            result = self.run_cli(cwd, "approve-planning", "req-login-timeout", "--by", "Liem", check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Implementation Guidance must include an Implementation Sketch", result.stdout)
+
+    def test_approve_planning_requires_decision_table_and_code_anchors(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            self.run_cli(cwd, "start", "req-login-timeout")
+            artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
+            text = artifact.read_text()
+            text = text.replace("TBD", "Download Neraca as Excel", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Acceptance exists", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Run validation", 1)
+            text = text.replace(
+                "## Implementation Guidance\n\nTBD\n\n### Implementation Sketch\n\nTBD\n\n### Decision Table\n\nTBD\n\n### Code Anchors\n\nTBD",
+                "## Implementation Guidance\n\nExpected location: controller.\n\n### Implementation Sketch\n\nPseudocode: change the selected branch only.",
+                1,
+            )
+            text = text.replace("- [ ] TBD", "- [ ] Implement download flow", 1)
+            artifact.write_text(text)
+
+            self.run_cli(cwd, "transition", "req-login-timeout", "planning")
+            result = self.run_cli(cwd, "approve-planning", "req-login-timeout", "--by", "Liem", check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Implementation Guidance must include a Decision Table", result.stdout)
 
     def test_planning_changes_after_approval_block_preflight(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -525,7 +599,13 @@ class HarnessCliTest(unittest.TestCase):
             planning_text = (cwd / ".harness" / "agents" / "planning.md").read_text()
             self.assertIn("Read `.harness/project/index.md`", planning_text)
             self.assertIn("lower-capability implementation agent", planning_text)
-            self.assertIn("sample function shape, or pseudocode", planning_text)
+            self.assertIn("Implementation Sketch", planning_text)
+            self.assertIn("Decision Table", planning_text)
+            self.assertIn("Code Anchors", planning_text)
+            implementation_text = (cwd / ".harness" / "agents" / "implementation.md").read_text()
+            self.assertIn("Follow the `### Implementation Sketch`", implementation_text)
+            self.assertIn("Use `### Decision Table`", implementation_text)
+            self.assertIn("Use `### Code Anchors`", implementation_text)
 
     def test_init_project_map_creates_missing_files_without_overwrite(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -642,6 +722,81 @@ class HarnessCliTest(unittest.TestCase):
 
             self.assertEqual(0, self.run_cli(cwd, "validate", "req-login-timeout").returncode)
 
+    def test_quality_check_transitions_to_approval_after_proof(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            artifact = self.enter_quality_check(cwd)
+            self.complete_quality_check(cwd, artifact)
+
+            result = self.run_cli(cwd, "transition", "req-login-timeout", "approval")
+
+            self.assertIn("transitioned: quality-check -> approval", result.stdout)
+            self.assertIn('status: "approval"', artifact.read_text())
+
+    def test_done_requires_quality_approval_after_proof(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            artifact = self.enter_quality_check(cwd)
+            self.complete_quality_check(cwd, artifact)
+            self.run_cli(cwd, "transition", "req-login-timeout", "approval")
+
+            result = self.run_cli(cwd, "transition", "req-login-timeout", "done", check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Quality evidence must be approved", result.stdout)
+
+    def test_approve_quality_requires_complete_quality_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            artifact = self.enter_quality_check(cwd)
+            self.complete_quality_check(cwd, artifact)
+            self.run_cli(cwd, "transition", "req-login-timeout", "approval")
+            text = artifact.read_text()
+            text = text.replace(
+                "### Commands Run\n\n- curl -i http://localhost/api/neraca\n- Sample response: status 200",
+                "### Commands Run\n\nTBD",
+            )
+            artifact.write_text(self.with_guidance(text))
+
+            result = self.run_cli(cwd, "approve-quality", "req-login-timeout", "--by", "Liem", check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("quality approval blocked", result.stdout)
+            self.assertIn("Quality Check Commands Run must record validation commands/results", result.stdout)
+
+    def test_approve_quality_records_final_approval_and_allows_done(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            artifact = self.enter_quality_check(cwd)
+            self.complete_quality_check(cwd, artifact)
+            self.run_cli(cwd, "transition", "req-login-timeout", "approval")
+
+            result = self.run_cli(cwd, "approve-quality", "req-login-timeout", "--by", "Liem")
+            done = self.run_cli(cwd, "transition", "req-login-timeout", "done")
+
+            self.assertIn("quality approved by Liem", result.stdout)
+            text = artifact.read_text()
+            self.assertIn('quality_approved: "true"', text)
+            self.assertIn('quality_approved_by: "Liem"', text)
+            self.assertIn("## Final Approval\n\nApproved by Liem", text)
+            self.assertIn("transitioned: approval -> done", done.stdout)
+
+    def test_quality_recovery_clears_quality_approval(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            artifact = self.enter_quality_check(cwd)
+            self.complete_quality_check(cwd, artifact)
+            self.run_cli(cwd, "transition", "req-login-timeout", "approval")
+            self.run_cli(cwd, "approve-quality", "req-login-timeout", "--by", "Liem")
+
+            result = self.run_cli(cwd, "recover", "req-login-timeout", "--reason", "approval rejected")
+
+            self.assertIn("transitioned: approval -> needs-fix", result.stdout)
+            text = artifact.read_text()
+            self.assertIn('quality_approved: "false"', text)
+            self.assertIn('quality_approved_by: ""', text)
+            self.assertIn("## Final Approval\n\nTBD", text)
+
     def test_linear_commands_are_removed(self):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)
@@ -714,6 +869,19 @@ class HarnessCliTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("differs from SQLite state", result.stdout)
 
+    def test_doctor_initializes_missing_sqlite_store_for_existing_scaffold(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            db = cwd / ".harness" / "harness.db"
+            db.unlink()
+
+            result = self.run_cli(cwd, "doctor")
+
+            self.assertIn("initialized missing SQLite state store", result.stdout)
+            self.assertIn("doctor ok", result.stdout)
+            self.assertTrue(db.exists())
+
     def test_attach_proof_records_link(self):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)
@@ -760,7 +928,6 @@ class HarnessCliTest(unittest.TestCase):
             text = text.replace("- [ ] TBD", "- [x] Implementation complete", 1)
             text = text.replace("### AI Review\n\nTBD", "### AI Review\n\nNo blocking issues.")
             text = text.replace("### Human Review\n\nTBD", "### Human Review\n\nLooks correct.")
-            text = text.replace("## Final Approval\n\nTBD", "## Final Approval\n\nApproved.")
             artifact.write_text(self.with_guidance(text))
 
             self.run_cli(cwd, "transition", "req-login-timeout", "planning")
@@ -773,7 +940,7 @@ class HarnessCliTest(unittest.TestCase):
             text = text.replace("### Commands Run\n\nTBD", "### Commands Run\n\n- build ok")
             text = text.replace("### Proof\n\n- [ ] TBD", "### Proof\n\n- [x] [missing.pdf](proof/missing.pdf)")
             artifact.write_text(self.with_guidance(text))
-            result = self.run_cli(cwd, "transition", "req-login-timeout", "done", check=False)
+            result = self.run_cli(cwd, "transition", "req-login-timeout", "approval", check=False)
 
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("Quality Check Proof needs at least one checked proof file under proof/", result.stdout)

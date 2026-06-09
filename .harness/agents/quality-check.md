@@ -10,7 +10,8 @@ On entry:
 3. Mark executed validation items checked in `## Validation Plan`.
 4. Record exact commands and results under `## Quality Check > Commands Run`.
 5. Attach proof with `harness attach-proof <session-id> <file>`.
-6. Run `harness validate <session-id>` before attempting `done`.
+6. Run `harness validate <session-id>`.
+7. Transition to `approval` and stop for human quality approval.
 
 Forbidden:
 

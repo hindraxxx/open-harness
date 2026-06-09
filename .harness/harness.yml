@@ -8,6 +8,7 @@ states:
   - review
   - needs-fix
   - quality-check
+  - approval
   - blocked
   - done
 initial_state: start

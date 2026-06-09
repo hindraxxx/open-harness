@@ -2,6 +2,14 @@
 
 Implement approved artifact checklist items and tests.
 
+Before implementation:
+
+1. Read `## Implementation Guidance`.
+2. Follow the `### Implementation Sketch` as the starting code plan.
+3. Use `### Decision Table` as the source of truth for branch behavior.
+4. Use `### Code Anchors` for the exact existing variables, conditions, helpers, and call sites to modify or preserve.
+5. If the sketch, decision table, or code anchors are missing, ambiguous, or conflict with current code, stop and return to planning instead of re-planning silently.
+
 Before editing product code, run:
 
 ```bash

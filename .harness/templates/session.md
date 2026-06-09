@@ -8,6 +8,9 @@ planning_approved_hash: ""
 review_approved: "false"
 review_approved_by: ""
 review_approved_at: ""
+quality_approved: "false"
+quality_approved_by: ""
+quality_approved_at: ""
 recovery_attempts: "0"
 created_at: "{{CREATED_AT}}"
 updated_at: "{{UPDATED_AT}}"
@@ -28,6 +31,18 @@ TBD
 - [ ] TBD
 
 ## Implementation Guidance
+
+TBD
+
+### Implementation Sketch
+
+TBD
+
+### Decision Table
+
+TBD
+
+### Code Anchors
 
 TBD
 
