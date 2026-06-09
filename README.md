@@ -51,10 +51,22 @@ Create a session:
 bin/harness start req-login-timeout
 ```
 
+List sessions:
+
+```bash
+bin/harness list
+```
+
 Check status and guardrails:
 
 ```bash
 bin/harness status req-login-timeout
+```
+
+Inspect session audit history:
+
+```bash
+bin/harness history req-login-timeout
 ```
 
 Validate the current state:

@@ -3,6 +3,8 @@ import sqlite3
 import subprocess
 import tempfile
 import unittest
+import importlib.machinery
+import importlib.util
 from pathlib import Path
 from typing import Optional
 
@@ -12,6 +14,14 @@ CLI = ROOT / "bin" / "harness"
 
 
 class HarnessCliTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        loader = importlib.machinery.SourceFileLoader("harness_mod", str(CLI))
+        spec = importlib.util.spec_from_loader(loader.name, loader)
+        module = importlib.util.module_from_spec(spec)
+        loader.exec_module(module)
+        cls.harness_module = module
+
     def run_cli(
         self,
         cwd: Path,
@@ -141,6 +151,34 @@ class HarnessCliTest(unittest.TestCase):
             with sqlite3.connect(cwd / ".harness" / "harness.db") as conn:
                 row = conn.execute("SELECT state FROM sessions WHERE session_id = ?", ("req-login-timeout",)).fetchone()
             self.assertEqual(("start",), row)
+
+    def test_list_reports_no_sessions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+
+            result = self.run_cli(cwd, "list")
+
+            self.assertEqual("no sessions\n", result.stdout)
+
+    def test_list_reports_sessions_newest_first(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            self.run_cli(cwd, "start", "alpha")
+            self.run_cli(cwd, "start", "beta")
+            with sqlite3.connect(cwd / ".harness" / "harness.db") as conn:
+                conn.execute("UPDATE sessions SET updated_at = ? WHERE session_id = ?", ("2026-01-01T00:00:00+00:00", "alpha"))
+                conn.execute("UPDATE sessions SET updated_at = ? WHERE session_id = ?", ("2026-01-02T00:00:00+00:00", "beta"))
+
+            result = self.run_cli(cwd, "list")
+
+            lines = result.stdout.splitlines()
+            self.assertEqual("session_id\tstate\tupdated_at\trecovery_attempts\tartifact", lines[0])
+            self.assertTrue(lines[1].startswith("beta\tstart\t2026-01-02T00:00:00+00:00\t0\t"))
+            self.assertTrue(lines[2].startswith("alpha\tstart\t2026-01-01T00:00:00+00:00\t0\t"))
+            self.assertIn(".harness/sessions/beta/artifact.md", lines[1])
+            self.assertIn(".harness/sessions/alpha/artifact.md", lines[2])
 
     def test_start_strips_legacy_linear_template_fields(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -447,6 +485,53 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn('status: "needs-fix"', artifact.read_text())
             self.assertIn('recovery_attempts: "1"', artifact.read_text())
 
+    def test_history_reports_audit_trail(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            review_file = cwd / "review.md"
+            proof = cwd / "proof.txt"
+            self.enter_review(cwd)
+            review_file.write_text("Review found a validation gap.\nSecond line ignored.\n")
+            proof.write_text("proof\n")
+            self.run_cli(
+                cwd,
+                "record-review",
+                "req-login-timeout",
+                "--file",
+                str(review_file),
+                "--required-fix",
+                "Add validation proof",
+            )
+            self.run_cli(cwd, "approve-review", "req-login-timeout", "--by", "Liem")
+            self.run_cli(cwd, "attach-proof", "req-login-timeout", str(proof))
+            self.run_cli(cwd, "recover", "req-login-timeout", "--reason", "open review item: Add validation proof")
+
+            result = self.run_cli(cwd, "history", "req-login-timeout")
+
+            self.assertIn("Session history: req-login-timeout", result.stdout)
+            self.assertIn("Transitions", result.stdout)
+            self.assertIn("start -> planning success", result.stdout)
+            self.assertIn("review -> needs-fix recovery reason: open review item: Add validation proof", result.stdout)
+            self.assertIn("Approvals", result.stdout)
+            self.assertIn("planning by Liem", result.stdout)
+            self.assertIn("review by Liem", result.stdout)
+            self.assertIn("Review Passes", result.stdout)
+            self.assertIn("Review found a validation gap. Second line ignored.", result.stdout)
+            self.assertIn("Required Fixes", result.stdout)
+            self.assertIn("open Add validation proof", result.stdout)
+            self.assertIn("Proofs", result.stdout)
+            self.assertIn("proof.txt", result.stdout)
+
+    def test_history_unknown_session_fails_clearly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+
+            result = self.run_cli(cwd, "history", "missing", check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("session not found in SQLite state store: missing", result.stderr)
+
     def test_recover_allows_three_attempts_then_blocks_on_next_failure(self):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)
@@ -464,6 +549,20 @@ class HarnessCliTest(unittest.TestCase):
             self.assertNotEqual(blocked.returncode, 0)
             self.assertIn("recovery blocked: 3/3 attempts used", blocked.stdout)
             self.assertIn('status: "blocked"', artifact.read_text())
+
+    def test_transition_out_of_blocked_resets_recovery_attempts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            artifact = self.enter_review(cwd)
+            self.run_cli(cwd, "recover", "req-login-timeout", "--reason", "review item 1")
+            self.run_cli(cwd, "recover", "req-login-timeout", "--reason", "review item 2")
+            self.run_cli(cwd, "recover", "req-login-timeout", "--reason", "review item 3")
+            self.run_cli(cwd, "recover", "req-login-timeout", "--reason", "review item 4", check=False)
+
+            result = self.run_cli(cwd, "transition", "req-login-timeout", "implementation")
+
+            self.assertIn("transitioned: blocked -> implementation", result.stdout)
+            self.assertIn('recovery_attempts: "0"', artifact.read_text())
 
     def test_recover_moves_quality_check_failure_to_needs_fix(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -571,6 +670,10 @@ class HarnessCliTest(unittest.TestCase):
             text = (cwd / "AGENTS.md").read_text()
             self.assertIn("preflight-edit", text)
             self.assertIn("If preflight blocks", text)
+            self.assertIn("If unsure the setup is healthy", text)
+            self.assertIn("harness list", text)
+            self.assertIn("harness validate <session-id>", text)
+            self.assertIn("harness recover <session-id>", text)
 
     def test_sync_guardrails_requires_force(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -606,6 +709,25 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("Follow the `### Implementation Sketch`", implementation_text)
             self.assertIn("Use `### Decision Table`", implementation_text)
             self.assertIn("Use `### Code Anchors`", implementation_text)
+            self.assertTrue((cwd / ".harness" / "agents" / "needs-fix.md").exists())
+            needs_fix_text = (cwd / ".harness" / "agents" / "needs-fix.md").read_text()
+            self.assertIn("Needs-Fix State Guardrails", needs_fix_text)
+            self.assertIn("harness history <session-id>", needs_fix_text)
+            self.assertIn("harness transition <session-id> implementation", needs_fix_text)
+
+    def test_generated_guardrails_cover_every_state(self):
+        generated = self.harness_module.default_agents()
+        expected = {f"{state}.md" for state in self.harness_module.STATES}
+        expected.add("common.md")
+        self.assertEqual(expected, set(generated))
+
+    def test_init_generates_guardrail_for_every_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+
+            for state in self.harness_module.STATES:
+                self.assertTrue((cwd / ".harness" / "agents" / f"{state}.md").exists(), state)
 
     def test_init_project_map_creates_missing_files_without_overwrite(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -881,6 +1003,56 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("initialized missing SQLite state store", result.stdout)
             self.assertIn("doctor ok", result.stdout)
             self.assertTrue(db.exists())
+
+    def test_doctor_reports_generated_guardrail_drift(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            (cwd / ".harness" / "agents" / "needs-fix.md").write_text("stale\n")
+
+            result = self.run_cli(cwd, "doctor", check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("guardrail drift", result.stdout)
+            self.assertIn("needs-fix.md", result.stdout)
+
+    def test_doctor_reports_bootstrap_drift(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            (cwd / "AGENTS.md").write_text("stale\n")
+
+            result = self.run_cli(cwd, "doctor", check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("bootstrap drift", result.stdout)
+
+    def test_doctor_reports_config_state_and_gitignore_issues(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            config = cwd / ".harness" / "harness.yml"
+            config.write_text(config.read_text().replace("  - needs-fix\n", ""))
+            gitignore = cwd / ".gitignore"
+            gitignore.write_text(".env\n")
+
+            result = self.run_cli(cwd, "doctor", check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("config states differ from CLI STATES", result.stdout)
+            self.assertIn(".gitignore missing .harness/harness.db", result.stdout)
+
+    def test_doctor_reports_missing_template_sections(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            template = cwd / ".harness" / "templates" / "session.md"
+            template.write_text(template.read_text().replace("## Validation Plan", "## Removed Validation Plan"))
+
+            result = self.run_cli(cwd, "doctor", check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("session template missing ## Validation Plan", result.stdout)
 
     def test_attach_proof_records_link(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -1,13 +1,13 @@
 # Needs-Fix State Guardrails
 
 Recovery state entered after a failed build, unit test, review, quality-check, or
-approval. Product code edits are allowed here so the agent can fix the failure and
-return to the prior gate.
+approval. Product code edits are allowed here so the agent can fix the recorded
+failure before returning through implementation.
 
 On entry:
 
 1. Confirm `harness status <session-id>` shows state `needs-fix`.
-2. Read the recovery reason and the relevant artifact sections:
+2. Read the recovery reason with `harness history <session-id>` and inspect the relevant artifact sections:
    - failed unit tests / build: `## Implementation Checklist` and `## Implementation Guidance`.
    - review fixes: `## Review > Required Fixes`.
    - quality failures: `## Validation Plan` and `## Quality Check > Commands Run`.
@@ -42,11 +42,11 @@ Forbidden:
 Exits:
 
 ```bash
-# back to review once fixes are in and rebuilt
-harness transition <session-id> review
+# return through implementation after fixes are complete
+harness transition <session-id> implementation
 
-# or back to quality-check if the failure was a validation failure
-harness transition <session-id> quality-check
+# or stop automation if the recovery cannot be completed
+harness transition <session-id> blocked
 ```
 
 If fixes fail again, recover instead of forcing a transition:

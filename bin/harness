@@ -603,6 +603,65 @@ Proof policy is configured in `.harness/harness.yml`:
 - `both`: require backend and frontend proof.
 - `manual`: require generic proof only.
 """,
+        "needs-fix.md": """# Needs-Fix State Guardrails
+
+Recovery state entered after a failed build, unit test, review, quality-check, or
+approval. Product code edits are allowed here so the agent can fix the recorded
+failure before returning through implementation.
+
+On entry:
+
+1. Confirm `harness status <session-id>` shows state `needs-fix`.
+2. Read the recovery reason with `harness history <session-id>` and inspect the relevant artifact sections:
+   - failed unit tests / build: `## Implementation Checklist` and `## Implementation Guidance`.
+   - review fixes: `## Review > Required Fixes`.
+   - quality failures: `## Validation Plan` and `## Quality Check > Commands Run`.
+3. Re-read `### Implementation Sketch`, `### Decision Table`, and `### Code Anchors`
+   before changing branch behavior.
+
+Before editing product code, run:
+
+```bash
+harness preflight-edit <session-id>
+```
+
+Allowed:
+
+- code edits required to resolve the recorded failure or required fix
+- test edits required by the validation plan
+- implementation/required-fix checklist updates
+
+Required:
+
+- Address only the recorded failure or human-selected required fixes. Do not expand scope.
+- Resolve and check every required fix item before transitioning forward.
+- Re-run the failing build/tests locally before transitioning.
+- Run `harness validate <session-id>` before any transition.
+
+Forbidden:
+
+- expanding scope without returning to `planning`
+- inventing proof or marking unresolved fixes complete
+- editing approval metadata, hashes, or artifact status manually
+
+Exits:
+
+```bash
+# return through implementation after fixes are complete
+harness transition <session-id> implementation
+
+# or stop automation if the recovery cannot be completed
+harness transition <session-id> blocked
+```
+
+If fixes fail again, recover instead of forcing a transition:
+
+```bash
+harness recover <session-id> --reason "needs-fix retry failed: <summary>"
+```
+
+After 3 recovery attempts the next recovery moves the session to `blocked` and stops automation.
+""",
         "approval.md": """# Approval State Guardrails
 
 Human quality approval happens after validation proof exists.
@@ -678,9 +737,12 @@ harness transition <session-id> done
 def default_agents_bootstrap() -> str:
     return """# Harness Agent Bootstrap
 
-For harness work, these rules are mandatory.
+For harness work, these rules are mandatory. `.harness/agents/common.md` is the
+canonical rule set; this file is the entry checklist.
 
-1. Identify the session id from the user request or current artifact.
+0. If unsure the setup is healthy, run `harness doctor`.
+1. Identify the session id from the user request, current artifact, or `harness list`.
+   If no session exists yet, create one with `harness start` before continuing.
 2. Run `harness status <session-id>`.
 3. Read `.harness/agents/common.md`.
 4. Read `.harness/project/index.md` if present.
@@ -688,13 +750,20 @@ For harness work, these rules are mandatory.
 6. Follow the state guardrails strictly.
 7. Before editing product code, run `harness preflight-edit <session-id>`.
 8. Edit product code only when preflight exits 0.
-9. Use `harness transition` for phase changes.
+9. Run `harness validate <session-id>` before every transition, then use
+   `harness transition` for phase changes.
 10. Never bypass transition guards by editing artifact status manually.
 11. Never write `.env` secrets into artifacts, logs, comments, or proof files.
 
 Project map rule: `.harness/project/` is orientation only. Current code wins; verify relevant facts before planning or editing.
 
-If the artifact status is `start`, `planning`, `review`, `quality-check`, `approval`, `blocked`, or `done`, product code edits are forbidden.
+Edit gate: product code edits are allowed only in `implementation` and `needs-fix`.
+They are forbidden in `start`, `planning`, `review`, `quality-check`, `approval`,
+`blocked`, and `done`.
+
+Failure path: when a build, test, review, quality-check, or approval fails, run
+`harness recover <session-id> --reason "<what failed>"` to drop into `needs-fix`.
+After 3 recovery attempts the next recovery moves to `blocked` and stops automation.
 
 If preflight blocks, stop and report the blocker.
 """
@@ -1048,6 +1117,24 @@ def current_state(session_id: str) -> str:
     if state not in STATES:
         die(f"invalid state in SQLite state store for {session_id}: {state}")
     return state
+
+
+def artifact_recovery_attempts(path: Path) -> str:
+    if not path.exists():
+        return "?"
+    data, _ = parse_frontmatter(read_text(path))
+    raw = data.get("recovery_attempts", "0")
+    try:
+        return str(max(int(raw), 0))
+    except ValueError:
+        return "0"
+
+
+def one_line_summary(value: str, limit: int = 120) -> str:
+    summary = " ".join(value.strip().split())
+    if len(summary) <= limit:
+        return summary
+    return summary[: limit - 3].rstrip() + "..."
 
 
 def section(text: str, heading: str) -> str:
@@ -1550,6 +1637,119 @@ def cmd_start(args: argparse.Namespace) -> None:
     print(f"proof: {proof_dir(args.session_id)}")
 
 
+def cmd_list(_args: argparse.Namespace) -> None:
+    with db() as conn:
+        rows = conn.execute(
+            """
+            SELECT session_id, state, artifact_path, updated_at
+            FROM sessions
+            ORDER BY updated_at DESC, session_id ASC
+            """
+        ).fetchall()
+    if not rows:
+        print("no sessions")
+        return
+    print("session_id\tstate\tupdated_at\trecovery_attempts\tartifact")
+    for row in rows:
+        path = Path(row["artifact_path"])
+        attempts = artifact_recovery_attempts(path)
+        print(f"{row['session_id']}\t{row['state']}\t{row['updated_at']}\t{attempts}\t{path}")
+
+
+def print_history_section(title: str, lines: list[str]) -> None:
+    print(title)
+    if lines:
+        for line in lines:
+            print(f"- {line}")
+    else:
+        print("- none")
+
+
+def cmd_history(args: argparse.Namespace) -> None:
+    current_state(args.session_id)
+    with db() as conn:
+        transitions = conn.execute(
+            """
+            SELECT created_at, from_state, to_state, result, reason
+            FROM transitions
+            WHERE session_id = ?
+            ORDER BY id ASC
+            """,
+            (args.session_id,),
+        ).fetchall()
+        approvals = conn.execute(
+            """
+            SELECT created_at, approval_type, approver
+            FROM approvals
+            WHERE session_id = ?
+            ORDER BY id ASC
+            """,
+            (args.session_id,),
+        ).fetchall()
+        review_passes = conn.execute(
+            """
+            SELECT created_at, content
+            FROM review_passes
+            WHERE session_id = ?
+            ORDER BY id ASC
+            """,
+            (args.session_id,),
+        ).fetchall()
+        required_fixes = conn.execute(
+            """
+            SELECT created_at, resolved_at, description, resolved
+            FROM required_fixes
+            WHERE session_id = ?
+            ORDER BY id ASC
+            """,
+            (args.session_id,),
+        ).fetchall()
+        proofs = conn.execute(
+            """
+            SELECT created_at, path, proof_type
+            FROM proofs
+            WHERE session_id = ?
+            ORDER BY id ASC
+            """,
+            (args.session_id,),
+        ).fetchall()
+
+    print(f"Session history: {args.session_id}")
+    print_history_section(
+        "Transitions",
+        [
+            f"{row['created_at']} {row['from_state']} -> {row['to_state']} {row['result']}"
+            + (f" reason: {row['reason']}" if row["reason"] else "")
+            for row in transitions
+        ],
+    )
+    print_history_section(
+        "Approvals",
+        [f"{row['created_at']} {row['approval_type']} by {row['approver']}" for row in approvals],
+    )
+    print_history_section(
+        "Review Passes",
+        [f"{row['created_at']} {one_line_summary(row['content'])}" for row in review_passes],
+    )
+    print_history_section(
+        "Required Fixes",
+        [
+            f"{row['created_at']} {'resolved' if row['resolved'] else 'open'}"
+            + (f" resolved_at: {row['resolved_at']}" if row["resolved_at"] else "")
+            + f" {row['description']}"
+            for row in required_fixes
+        ],
+    )
+    print_history_section(
+        "Proofs",
+        [
+            f"{row['created_at']} {row['path']}"
+            + (f" type: {row['proof_type']}" if row["proof_type"] else "")
+            for row in proofs
+        ],
+    )
+
+
 def cmd_status(args: argparse.Namespace) -> None:
     state = current_state(args.session_id)
     missing = validate_requirements(args.session_id)
@@ -1751,7 +1951,7 @@ def cmd_transition(args: argparse.Namespace) -> None:
                 print(f"- {path}")
             raise SystemExit(1)
     set_session_state(args.session_id, args.state)
-    if args.state == "done":
+    if state == "blocked" or args.state == "done":
         set_recovery_attempts(args.session_id, 0)
     record_transition(args.session_id, state, args.state, "success")
     print(f"transitioned: {state} -> {args.state}")
@@ -1833,8 +2033,80 @@ def cmd_migrate_sqlite(_args: argparse.Namespace) -> None:
     print(f"migrated sessions: {migrated}")
 
 
-def cmd_doctor(_args: argparse.Namespace) -> None:
+def config_states() -> list[str]:
+    path = harness_dir() / "harness.yml"
+    if not path.exists():
+        return []
+    states = []
+    in_states = False
+    for line in path.read_text().splitlines():
+        stripped = line.strip()
+        if stripped == "states:":
+            in_states = True
+            continue
+        if in_states:
+            if not line.startswith("  "):
+                break
+            if stripped.startswith("- "):
+                states.append(stripped[2:].strip())
+    return states
+
+
+def doctor_static_issues() -> list[str]:
     issues = []
+    generated = default_agents()
+    expected_agents = {f"{state}.md" for state in STATES}
+    expected_agents.add("common.md")
+    generated_agents = set(generated)
+    for name in sorted(expected_agents - generated_agents):
+        issues.append(f"generated guardrails missing {name} from default_agents()")
+    for name in sorted(generated_agents - expected_agents):
+        issues.append(f"generated guardrails include unexpected file {name}")
+    for name, content in sorted(generated.items()):
+        path = agents_dir() / name
+        if not path.exists():
+            issues.append(f"missing guardrail file: {path}")
+        elif path.read_text() != content:
+            issues.append(f"guardrail drift: {path} differs from default_agents()")
+    bootstrap = root() / "AGENTS.md"
+    if not bootstrap.exists():
+        issues.append(f"missing bootstrap file: {bootstrap}")
+    elif bootstrap.read_text() != default_agents_bootstrap():
+        issues.append(f"bootstrap drift: {bootstrap} differs from default_agents_bootstrap()")
+    states = config_states()
+    if states and states != STATES:
+        issues.append(f"config states differ from CLI STATES: {states}")
+    elif not states and (harness_dir() / "harness.yml").exists():
+        issues.append("config states missing from .harness/harness.yml")
+    gitignore = root() / ".gitignore"
+    if not gitignore.exists():
+        issues.append("missing .gitignore")
+    else:
+        lines = set(gitignore.read_text().splitlines())
+        for required in [".env", ".harness/harness.db"]:
+            if required not in lines:
+                issues.append(f".gitignore missing {required}")
+    if template_path().exists():
+        template = template_path().read_text()
+        for heading in [
+            "Requirement Summary",
+            "Acceptance Criteria",
+            "Validation Plan",
+            "Implementation Guidance",
+            "Implementation Checklist",
+            "Review",
+            "Quality Check",
+            "Final Approval",
+        ]:
+            if f"## {heading}" not in template:
+                issues.append(f"session template missing ## {heading}")
+    elif harness_dir().exists():
+        issues.append(f"missing session template: {template_path()}")
+    return issues
+
+
+def cmd_doctor(_args: argparse.Namespace) -> None:
+    issues = doctor_static_issues()
     if not db_path().exists():
         if harness_dir().exists() and template_path().exists() and agents_dir().exists():
             init_db()
@@ -1900,6 +2172,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor_p = sub.add_parser("doctor")
     doctor_p.set_defaults(func=cmd_doctor)
+
+    list_p = sub.add_parser("list")
+    list_p.set_defaults(func=cmd_list)
+
+    history_p = sub.add_parser("history")
+    history_p.add_argument("session_id")
+    history_p.set_defaults(func=cmd_history)
 
     status_p = sub.add_parser("status")
     status_p.add_argument("session_id")
