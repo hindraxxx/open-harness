@@ -93,9 +93,9 @@ bin/harness transition req-login-timeout implementation
 
 `planning -> implementation` requires explicit planning approval. Agents must not run `approve-planning` unless the user explicitly approves the plan.
 
-`approve-planning` marks `## Acceptance Criteria` items checked as requirement approval, then locks a hash of Requirement Summary, Acceptance Criteria, Validation Plan, and Implementation Guidance. If those planning sections change after approval, implementation/edit gates block until planning is approved again. Validation Plan and Implementation Checklist remain execution checklists; checking implementation items during implementation does not invalidate planning approval.
+`approve-planning` marks `## Acceptance Criteria` items checked as requirement approval, then locks a hash of Requirement Summary, Acceptance Criteria, Validation Plan content, and Implementation Guidance. If those planning sections change after approval, implementation/edit gates block until planning is approved again. Validation Plan and Implementation Checklist remain execution checklists; checking validation or implementation items during execution does not invalidate planning approval.
 
-Planning must include concrete handoff details inside `## Implementation Guidance`: a `### Implementation Sketch` with pseudocode, sample function shape, or code-shape steps; a `### Decision Table` mapping important branches or input states to expected behavior; and `### Code Anchors` naming exact existing variables, conditions, helpers, or call sites. This is intentionally required so lower-capability implementation agents can execute the approved approach directly instead of re-planning.
+Planning must include concrete handoff details inside `## Implementation Guidance`: a `### Implementation Sketch` containing all pseudocode, sample function shapes, and code-shape steps; a `### Decision Table` mapping important branches or input states to expected behavior; and `### Code Anchors` naming exact existing variables, conditions, helpers, or call sites. This is intentionally required so lower-capability implementation agents can execute the approved approach directly instead of re-planning.
 
 After implementation, move to review and stop for human review:
 
@@ -176,7 +176,7 @@ harness doctor
 
 `harness init` does not overwrite existing non-empty templates or project maps. New sessions created from legacy templates automatically strip old Linear metadata fields.
 
-Use `sync-guardrails --force` after CLI upgrades. It overwrites only the agent guardrail files and root `AGENTS.md`.
+Use `sync-guardrails --force` after CLI upgrades. It overwrites only the agent guardrail files and the bootstrap file. In normal child repositories that bootstrap file is `AGENTS.md`; in this workflow-project repository the source sample is `AGENTS_SAMPLE.md`.
 
 Legacy alias:
 
@@ -218,7 +218,7 @@ This overwrites `.harness/project/*.md` templates only. It does not touch sessio
 
 Tell an agent the session id. The agent should:
 
-1. Read `AGENTS.md`.
+1. Read the repository bootstrap instructions. Normal child repositories use `AGENTS.md`; this workflow-project repository keeps the source sample in `AGENTS_SAMPLE.md`.
 2. Run `bin/harness status <session-id>`.
 3. Read `.harness/agents/common.md`.
 4. Read `.harness/project/index.md` when present.

@@ -66,6 +66,13 @@ def proof_dir(session_id: str) -> Path:
     return sessions_dir() / session_id / "proof"
 
 
+def agents_bootstrap_path() -> Path:
+    sample = root() / "AGENTS_SAMPLE.md"
+    if sample.exists():
+        return sample
+    return root() / "AGENTS.md"
+
+
 def db_path() -> Path:
     return harness_dir() / "harness.db"
 
@@ -469,11 +476,13 @@ Planning must include real checklist items in:
 
 - expected file/function/module locations discovered during exploration
 - current behavior to change or preserve
-- a mandatory `### Implementation Sketch` subsection containing pseudocode, a sample function shape, or concrete code-shape steps the implementation agent can follow directly
+- a mandatory `### Implementation Sketch` subsection containing all pseudocode, sample function shapes, and concrete code-shape steps the implementation agent can follow directly
 - a mandatory `### Decision Table` subsection mapping each important branch/input state to the expected behavior, metric, return value, or side effect
 - a mandatory `### Code Anchors` subsection naming the exact existing variables, conditions, helper functions, or call sites the implementation must use for key decisions
 - invariants and out-of-scope areas that must not be changed
 - concrete data cases or examples the implementer should verify
+
+Do not put pseudocode or sample code in a separate top-level section. Keep it inside `### Implementation Sketch` so implementers find the intended code shape in one place.
 
 Do not transition to implementation with placeholder `TBD` checklist items.
 """,
@@ -781,7 +790,7 @@ def overwrite_guardrails() -> list[Path]:
         path = agents_dir() / name
         path.write_text(content)
         written.append(path)
-    path = root() / "AGENTS.md"
+    path = agents_bootstrap_path()
     path.write_text(default_agents_bootstrap())
     written.append(path)
     return written
@@ -980,6 +989,8 @@ def render_artifact_html(session_id: str) -> Path | None:
         return None
     metadata, body = parse_frontmatter(read_text(md_path))
     title = metadata.get("session_id") or session_id
+    status = metadata.get("status", "unknown")
+    updated_at = metadata.get("updated_at", "")
     meta_rows = "".join(
         f"<tr><th>{html.escape(key)}</th><td>{html.escape(value)}</td></tr>"
         for key, value in metadata.items()
@@ -991,28 +1002,180 @@ def render_artifact_html(session_id: str) -> Path | None:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Harness Artifact: {html.escape(title)}</title>
 <style>
-:root {{ color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
-body {{ margin: 0; background: #f6f7f9; color: #1f2933; line-height: 1.5; }}
-main {{ max-width: 980px; margin: 0 auto; padding: 32px 20px 56px; }}
-h1, h2, h3, h4 {{ color: #111827; line-height: 1.2; margin: 1.4em 0 0.55em; }}
-h1 {{ margin-top: 0; font-size: 2rem; }}
-h2 {{ border-top: 1px solid #d8dee8; padding-top: 1.2rem; }}
+:root {{
+  color-scheme: light;
+  font-family: "Avenir Next", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+  --ink: #17202a;
+  --muted: #637083;
+  --line: #d9e0e8;
+  --paper: #ffffff;
+  --wash: #f4f6f8;
+  --accent: #176d73;
+  --accent-soft: #dff1f1;
+  --code: #18212f;
+}}
+* {{ box-sizing: border-box; }}
+body {{
+  margin: 0;
+  background:
+    linear-gradient(180deg, rgba(223, 241, 241, 0.65), rgba(244, 246, 248, 0) 360px),
+    var(--wash);
+  color: var(--ink);
+  line-height: 1.55;
+}}
+main {{
+  width: min(1180px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 34px 0 64px;
+}}
+.artifact-shell {{
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 28px;
+  align-items: start;
+}}
+.hero {{
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 28px;
+  padding-bottom: 22px;
+}}
+.eyebrow {{
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  margin: 0 0 8px;
+  text-transform: uppercase;
+}}
+h1, h2, h3, h4 {{
+  color: var(--ink);
+  line-height: 1.18;
+  margin: 1.45em 0 0.58em;
+}}
+h1 {{
+  font-size: clamp(2rem, 4vw, 3.4rem);
+  letter-spacing: 0;
+  margin: 0;
+  max-width: 820px;
+}}
+h2 {{
+  border-top: 1px solid var(--line);
+  font-size: 1.48rem;
+  padding-top: 1.35rem;
+}}
+h3 {{ font-size: 1.1rem; }}
 p, li {{ font-size: 0.98rem; }}
-a {{ color: #0f5fa8; }}
-pre {{ overflow-x: auto; background: #111827; color: #f9fafb; padding: 14px; border-radius: 6px; }}
-code {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }}
-table {{ width: 100%; border-collapse: collapse; margin: 1rem 0; background: #fff; }}
-th, td {{ border: 1px solid #d8dee8; padding: 8px 10px; text-align: left; vertical-align: top; }}
-thead, th {{ background: #eef2f7; }}
-.meta {{ margin: 0 0 1.5rem; }}
-.check {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #374151; }}
+p {{ margin: 0.7rem 0; max-width: 76ch; }}
+ul {{ padding-left: 1.15rem; }}
+li {{ margin: 0.35rem 0; }}
+a {{ color: #0f5f66; font-weight: 650; }}
+pre {{
+  overflow-x: auto;
+  background: var(--code);
+  color: #f7fafc;
+  padding: 16px 18px;
+  border-radius: 7px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+}}
+code {{
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.92em;
+}}
+table {{
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  overflow: hidden;
+}}
+th, td {{
+  border-bottom: 1px solid var(--line);
+  padding: 9px 11px;
+  text-align: left;
+  vertical-align: top;
+}}
+tr:last-child th, tr:last-child td {{ border-bottom: 0; }}
+th {{
+  background: #edf3f5;
+  color: #334155;
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  width: 34%;
+}}
+.content {{
+  background: rgba(255, 255, 255, 0.76);
+  border: 1px solid rgba(217, 224, 232, 0.9);
+  border-radius: 8px;
+  padding: 26px 30px 34px;
+}}
+.meta-card {{
+  position: sticky;
+  top: 22px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+}}
+.meta-card h2 {{
+  border: 0;
+  font-size: 0.92rem;
+  letter-spacing: 0.06em;
+  margin: 0 0 12px;
+  padding: 0;
+  text-transform: uppercase;
+}}
+.status-line {{
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+  color: var(--muted);
+  flex-wrap: wrap;
+}}
+.pill {{
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(23, 109, 115, 0.22);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: #0d555a;
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 5px 10px;
+}}
+.meta {{ margin: 0; font-size: 0.85rem; }}
+.meta th, .meta td {{ padding: 7px 8px; word-break: break-word; }}
+.check {{
+  color: var(--accent);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-weight: 700;
+}}
+@media (max-width: 900px) {{
+  main {{ width: min(100% - 28px, 720px); padding-top: 24px; }}
+  .artifact-shell {{ grid-template-columns: 1fr; }}
+  .meta-card {{ position: static; order: -1; }}
+  .content {{ padding: 20px; }}
+}}
 </style>
 </head>
 <body>
 <main>
-<h1>Harness Artifact: {html.escape(title)}</h1>
-<table class="meta">{meta_rows}</table>
+<section class="hero">
+<p class="eyebrow">Harness Artifact</p>
+<h1>{html.escape(title)}</h1>
+<div class="status-line"><span class="pill">State: {html.escape(status)}</span><span>Updated: {html.escape(updated_at)}</span></div>
+</section>
+<div class="artifact-shell">
+<article class="content">
 {render_markdown_body(body)}
+</article>
+<aside class="meta-card">
+<h2>Session Metadata</h2>
+<table class="meta">{meta_rows}</table>
+</aside>
+</div>
 </main>
 </body>
 </html>
@@ -1725,7 +1888,7 @@ def cmd_init(_args: argparse.Namespace) -> None:
     write_new(root() / ".env.example", default_env_example())
     init_db()
     migrate_sqlite()
-    write_new(root() / "AGENTS.md", default_agents_bootstrap())
+    write_new(agents_bootstrap_path(), default_agents_bootstrap())
     for name, content in default_agents().items():
         write_new(agents_dir() / name, content)
     write_project_map(overwrite=False)
@@ -1761,7 +1924,7 @@ def print_synced_guardrails(written: list[Path]) -> None:
 
 def cmd_sync_guardrails(args: argparse.Namespace) -> None:
     if not args.force:
-        die("sync-guardrails overwrites AGENTS.md and .harness/agents/*.md; rerun with --force")
+        die(f"sync-guardrails overwrites {agents_bootstrap_path().name} and .harness/agents/*.md; rerun with --force")
     print_synced_guardrails(overwrite_guardrails())
 
 
@@ -2234,7 +2397,7 @@ def doctor_static_issues() -> list[str]:
             issues.append(f"missing guardrail file: {path}")
         elif path.read_text() != content:
             issues.append(f"guardrail drift: {path} differs from default_agents()")
-    bootstrap = root() / "AGENTS.md"
+    bootstrap = agents_bootstrap_path()
     if not bootstrap.exists():
         issues.append(f"missing bootstrap file: {bootstrap}")
     elif bootstrap.read_text() != default_agents_bootstrap():

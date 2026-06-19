@@ -773,6 +773,23 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("harness history <session-id>", needs_fix_text)
             self.assertIn("harness transition <session-id> implementation", needs_fix_text)
 
+    def test_existing_agents_sample_is_used_as_bootstrap_source(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            (cwd / "AGENTS_SAMPLE.md").write_text("old sample\n")
+
+            self.run_cli(cwd, "init")
+
+            self.assertFalse((cwd / "AGENTS.md").exists())
+            drift = self.run_cli(cwd, "doctor", check=False)
+            self.assertNotEqual(drift.returncode, 0)
+            self.assertIn("AGENTS_SAMPLE.md", drift.stdout)
+
+            result = self.run_cli(cwd, "sync-guardrails", "--force")
+            self.assertIn("- AGENTS_SAMPLE.md", result.stdout)
+            self.assertIn("Harness Agent Bootstrap", (cwd / "AGENTS_SAMPLE.md").read_text())
+            self.assertFalse((cwd / "AGENTS.md").exists())
+
     def test_generated_guardrails_cover_every_state(self):
         generated = self.harness_module.default_agents()
         expected = {f"{state}.md" for state in self.harness_module.STATES}
