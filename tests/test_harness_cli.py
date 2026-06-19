@@ -142,15 +142,42 @@ class HarnessCliTest(unittest.TestCase):
             self.run_cli(cwd, "start", "req-login-timeout")
 
             artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
+            html_artifact = artifact.with_suffix(".html")
             self.assertTrue(artifact.exists())
+            self.assertTrue(html_artifact.exists())
             self.assertTrue((artifact.parent / "proof").is_dir())
             text = artifact.read_text()
             self.assertIn('session_id: "req-login-timeout"', text)
             self.assertIn("## Implementation Guidance", text)
             self.assertNotIn("linear_issue_key", text)
+            html_text = html_artifact.read_text()
+            self.assertIn("Harness Artifact: req-login-timeout", html_text)
+            self.assertIn("<h2>Implementation Guidance</h2>", html_text)
             with sqlite3.connect(cwd / ".harness" / "harness.db") as conn:
                 row = conn.execute("SELECT state FROM sessions WHERE session_id = ?", ("req-login-timeout",)).fetchone()
             self.assertEqual(("start",), row)
+
+    def test_status_refreshes_html_from_current_markdown_and_escapes_content(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            self.run_cli(cwd, "start", "req-login-timeout")
+            artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
+            html_artifact = artifact.with_suffix(".html")
+            artifact.write_text(
+                artifact.read_text().replace(
+                    "## Requirement Summary\n\nTBD",
+                    "## Requirement Summary\n\nReview <script>alert('x')</script> safely.",
+                    1,
+                )
+            )
+
+            result = self.run_cli(cwd, "status", "req-login-timeout")
+
+            self.assertIn(f"HTML artifact: {html_artifact.resolve()}", result.stdout)
+            html_text = html_artifact.read_text()
+            self.assertIn("Review &lt;script&gt;alert(&#x27;x&#x27;)&lt;/script&gt; safely.", html_text)
+            self.assertNotIn("<script>alert", html_text)
 
     def test_list_reports_no_sessions(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -413,6 +440,7 @@ class HarnessCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)
             artifact = self.enter_review(cwd)
+            html_artifact = artifact.with_suffix(".html")
 
             result = self.run_cli(cwd, "record-review", "req-login-timeout", "--ai", "No blocking issues.")
 
@@ -422,6 +450,7 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("#### Review pass", text)
             self.assertIn("No blocking issues.", text)
             self.assertIn("### Human Review\n\nTBD", text)
+            self.assertIn("No blocking issues.", html_artifact.read_text())
             with sqlite3.connect(cwd / ".harness" / "harness.db") as conn:
                 count = conn.execute("SELECT COUNT(*) FROM review_passes WHERE session_id = ?", ("req-login-timeout",)).fetchone()[0]
             self.assertEqual(1, count)
@@ -658,6 +687,35 @@ class HarnessCliTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("Validation Plan checklist must be executed", result.stdout)
             self.assertIn("Quality Check Commands Run", result.stdout)
+
+    def test_executing_validation_plan_does_not_invalidate_planning_approval(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            self.run_cli(cwd, "start", "req-login-timeout")
+            artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
+            text = artifact.read_text()
+            text = text.replace("TBD", "Download Neraca as Excel", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Acceptance exists", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Run validation", 1)
+            text = text.replace("- [ ] TBD", "- [x] Implementation complete", 1)
+            text = text.replace("### AI Review\n\nTBD", "### AI Review\n\nNo blocking issues.")
+            text = text.replace("### Human Review\n\nTBD", "### Human Review\n\nLooks correct.")
+            artifact.write_text(self.with_guidance(text))
+
+            self.run_cli(cwd, "transition", "req-login-timeout", "planning")
+            self.run_cli(cwd, "approve-planning", "req-login-timeout", "--by", "Liem")
+            self.run_cli(cwd, "transition", "req-login-timeout", "implementation")
+            self.run_cli(cwd, "transition", "req-login-timeout", "review")
+            self.run_cli(cwd, "approve-review", "req-login-timeout", "--by", "Liem")
+            self.run_cli(cwd, "transition", "req-login-timeout", "quality-check")
+            artifact.write_text(artifact.read_text().replace("- [ ] Run validation", "- [x] Run validation"))
+            self.complete_quality_check(cwd, artifact)
+
+            result = self.run_cli(cwd, "validate", "req-login-timeout", check=False)
+
+            self.assertEqual(0, result.returncode)
+            self.assertNotIn("Planning sections changed after approval", result.stdout)
 
     def test_upgrade_guardrails_overwrites_bootstrap(self):
         with tempfile.TemporaryDirectory() as tmp:

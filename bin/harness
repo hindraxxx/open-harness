@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import hashlib
+import html
 import json
 import os
 import re
@@ -55,6 +56,10 @@ def template_path() -> Path:
 
 def artifact_path(session_id: str) -> Path:
     return sessions_dir() / session_id / "artifact.md"
+
+
+def artifact_html_path(session_id: str) -> Path:
+    return artifact_path(session_id).with_suffix(".html")
 
 
 def proof_dir(session_id: str) -> Path:
@@ -868,12 +873,162 @@ def dump_frontmatter(data: dict[str, str], body: str) -> str:
     return "\n".join(lines) + "\n" + body.lstrip("\n")
 
 
+def render_inline_markdown(value: str) -> str:
+    escaped = html.escape(value)
+    return re.sub(
+        r"\[([^\]]+)\]\(([^)]+)\)",
+        lambda match: f'<a href="{html.escape(match.group(2), quote=True)}">{match.group(1)}</a>',
+        escaped,
+    )
+
+
+def render_markdown_table(lines: list[str]) -> str:
+    rows = []
+    for index, line in enumerate(lines):
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if index == 1 and all(re.fullmatch(r":?-{3,}:?", cell) for cell in cells):
+            continue
+        tag = "th" if index == 0 else "td"
+        rows.append("<tr>" + "".join(f"<{tag}>{render_inline_markdown(cell)}</{tag}>" for cell in cells) + "</tr>")
+    return "<table>" + "".join(rows) + "</table>"
+
+
+def render_markdown_body(body: str) -> str:
+    parts = []
+    paragraph = []
+    list_items = []
+    table_lines = []
+    code_lines = []
+    in_code = False
+
+    def flush_paragraph() -> None:
+        if paragraph:
+            parts.append(f"<p>{render_inline_markdown(' '.join(paragraph))}</p>")
+            paragraph.clear()
+
+    def flush_list() -> None:
+        if list_items:
+            parts.append("<ul>" + "".join(list_items) + "</ul>")
+            list_items.clear()
+
+    def flush_table() -> None:
+        if table_lines:
+            parts.append(render_markdown_table(table_lines))
+            table_lines.clear()
+
+    for raw_line in body.splitlines():
+        line = raw_line.rstrip()
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            flush_paragraph()
+            flush_list()
+            flush_table()
+            if in_code:
+                parts.append(f"<pre><code>{html.escape(chr(10).join(code_lines))}</code></pre>")
+                code_lines.clear()
+                in_code = False
+            else:
+                in_code = True
+            continue
+        if in_code:
+            code_lines.append(line)
+            continue
+        if not stripped:
+            flush_paragraph()
+            flush_list()
+            flush_table()
+            continue
+        heading = re.match(r"^(#{1,6})\s+(.+)$", stripped)
+        if heading:
+            flush_paragraph()
+            flush_list()
+            flush_table()
+            level = len(heading.group(1))
+            parts.append(f"<h{level}>{render_inline_markdown(heading.group(2))}</h{level}>")
+            continue
+        if "|" in stripped and stripped.startswith("|") and stripped.endswith("|"):
+            flush_paragraph()
+            flush_list()
+            table_lines.append(stripped)
+            continue
+        flush_table()
+        item = re.match(r"^-\s+\[([ xX])\]\s+(.+)$", stripped)
+        if item:
+            flush_paragraph()
+            marker = "[x]" if item.group(1).lower() == "x" else "[ ]"
+            list_items.append(f'<li><span class="check">{marker}</span> {render_inline_markdown(item.group(2))}</li>')
+            continue
+        item = re.match(r"^-\s+(.+)$", stripped)
+        if item:
+            flush_paragraph()
+            list_items.append(f"<li>{render_inline_markdown(item.group(1))}</li>")
+            continue
+        flush_list()
+        paragraph.append(stripped)
+
+    if in_code:
+        parts.append(f"<pre><code>{html.escape(chr(10).join(code_lines))}</code></pre>")
+    flush_paragraph()
+    flush_list()
+    flush_table()
+    return "\n".join(parts)
+
+
+def render_artifact_html(session_id: str) -> Path | None:
+    md_path = artifact_path(session_id)
+    if not md_path.exists():
+        return None
+    metadata, body = parse_frontmatter(read_text(md_path))
+    title = metadata.get("session_id") or session_id
+    meta_rows = "".join(
+        f"<tr><th>{html.escape(key)}</th><td>{html.escape(value)}</td></tr>"
+        for key, value in metadata.items()
+    )
+    document = f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Harness Artifact: {html.escape(title)}</title>
+<style>
+:root {{ color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
+body {{ margin: 0; background: #f6f7f9; color: #1f2933; line-height: 1.5; }}
+main {{ max-width: 980px; margin: 0 auto; padding: 32px 20px 56px; }}
+h1, h2, h3, h4 {{ color: #111827; line-height: 1.2; margin: 1.4em 0 0.55em; }}
+h1 {{ margin-top: 0; font-size: 2rem; }}
+h2 {{ border-top: 1px solid #d8dee8; padding-top: 1.2rem; }}
+p, li {{ font-size: 0.98rem; }}
+a {{ color: #0f5fa8; }}
+pre {{ overflow-x: auto; background: #111827; color: #f9fafb; padding: 14px; border-radius: 6px; }}
+code {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }}
+table {{ width: 100%; border-collapse: collapse; margin: 1rem 0; background: #fff; }}
+th, td {{ border: 1px solid #d8dee8; padding: 8px 10px; text-align: left; vertical-align: top; }}
+thead, th {{ background: #eef2f7; }}
+.meta {{ margin: 0 0 1.5rem; }}
+.check {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #374151; }}
+</style>
+</head>
+<body>
+<main>
+<h1>Harness Artifact: {html.escape(title)}</h1>
+<table class="meta">{meta_rows}</table>
+{render_markdown_body(body)}
+</main>
+</body>
+</html>
+"""
+    html_path = artifact_html_path(session_id)
+    html_path.write_text(document)
+    return html_path
+
+
 def update_artifact_meta(session_id: str, updates: dict[str, str]) -> None:
     path = artifact_path(session_id)
     data, body = parse_frontmatter(read_text(path))
     data.update(updates)
     data["updated_at"] = now()
     path.write_text(dump_frontmatter(data, body))
+    render_artifact_html(session_id)
 
 
 def recovery_attempts(session_id: str) -> int:
@@ -1265,6 +1420,10 @@ def has_screenshot_proof(session_id: str, value: str) -> bool:
     return False
 
 
+def validation_plan_for_planning_snapshot(text: str) -> str:
+    return re.sub(r"^-\s*\[[xX]\]\s+", "- [ ] ", section(text, "Validation Plan"), flags=re.MULTILINE)
+
+
 def planning_snapshot(text: str) -> str:
     parts = [
         "Requirement Summary",
@@ -1272,7 +1431,7 @@ def planning_snapshot(text: str) -> str:
         "Acceptance Criteria",
         section(text, "Acceptance Criteria"),
         "Validation Plan",
-        section(text, "Validation Plan"),
+        validation_plan_for_planning_snapshot(text),
         "Implementation Guidance",
         section(text, "Implementation Guidance"),
     ]
@@ -1632,8 +1791,10 @@ def cmd_start(args: argparse.Namespace) -> None:
     proof_dir(args.session_id).mkdir(parents=True, exist_ok=True)
     artifact_path(args.session_id).write_text(content)
     insert_session(args.session_id, "start", created)
+    render_artifact_html(args.session_id)
     print(f"created session: {args.session_id}")
     print(f"artifact: {artifact_path(args.session_id)}")
+    print(f"html artifact: {artifact_html_path(args.session_id)}")
     print(f"proof: {proof_dir(args.session_id)}")
 
 
@@ -1753,9 +1914,12 @@ def cmd_history(args: argparse.Namespace) -> None:
 def cmd_status(args: argparse.Namespace) -> None:
     state = current_state(args.session_id)
     missing = validate_requirements(args.session_id)
+    html_path = render_artifact_html(args.session_id)
     print(f"Session: {args.session_id}")
     print(f"State: {state}")
     print(f"Artifact: {artifact_path(args.session_id)}")
+    if html_path:
+        print(f"HTML artifact: {html_path}")
     print(f"State store: {db_path()}")
     print(f"Common guardrail: {agents_dir() / 'common.md'}")
     print(f"State guardrail: {agents_dir() / (state + '.md')}")
@@ -1788,6 +1952,7 @@ def cmd_validate(args: argparse.Namespace) -> None:
         for item in missing:
             print(f"- {item}")
         raise SystemExit(1)
+    render_artifact_html(args.session_id)
     print("valid")
 
 
@@ -1920,6 +2085,7 @@ def cmd_record_review(args: argparse.Namespace) -> None:
             for fix in clean_fixes:
                 insert_required_fix(args.session_id, fix)
     path.write_text(text)
+    render_artifact_html(args.session_id)
     print(f"recorded AI review: {args.session_id}")
 
 
