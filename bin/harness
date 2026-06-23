@@ -117,6 +117,22 @@ def ensure_gitignore() -> None:
         path.write_text("".join(f"{line}\n" for line in required))
 
 
+def default_approval_name(explicit: str | None) -> str:
+    if explicit:
+        return explicit
+    result = subprocess.run(
+        ["whoami"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    name = result.stdout.strip() if result.returncode == 0 else ""
+    if name:
+        return name
+    return os.environ.get("USER") or os.environ.get("USERNAME") or "unknown"
+
+
 def default_config() -> str:
     return """version: 1
 artifact: artifact.md
@@ -480,13 +496,14 @@ Exit only after human approval:
 
 ```bash
 harness validate <session-id>
-harness approve-planning <session-id> --by <human-name>
+harness approve-planning <session-id>
 harness transition <session-id> implementation
 ```
 
 `harness validate <session-id>` must show no missing planning fields before asking for human approval.
 
 Agents must not run `approve-planning` unless the user explicitly instructs them to approve planning.
+`approve-planning` uses `whoami` for the approver name by default; pass `--by <human-name>` only to override it.
 
 Before filling the session artifact:
 
@@ -599,11 +616,12 @@ harness recover <session-id> --reason "open review item: <summary>"
 Quality-check requires explicit human approval:
 
 ```bash
-harness approve-review <session-id> --by <human-name>
+harness approve-review <session-id>
 harness transition <session-id> quality-check
 ```
 
 Agents must not run `approve-review` unless the user explicitly instructs them to approve review.
+`approve-review` uses `whoami` for the approver name by default; pass `--by <human-name>` only to override it.
 
 Before quality-check:
 
@@ -653,8 +671,8 @@ Proof policy is configured in `.harness/harness.yml`:
         "needs-fix.md": """# Needs-Fix State Guardrails
 
 Recovery state entered after a failed build, unit test, review, quality-check, or
-approval. Product code edits are allowed here so the agent can fix the recorded
-failure before returning through implementation.
+approval. Product code edits are allowed directly in this state so the agent can
+fix the recorded failure before returning through implementation.
 
 On entry:
 
@@ -681,7 +699,7 @@ Allowed:
 Required:
 
 - Address only the recorded failure or human-selected required fixes. Do not expand scope.
-- Resolve and check every required fix item before transitioning forward.
+- Resolve and check every relevant implementation or required-fix checklist item before transitioning forward.
 - Re-run the failing build/tests locally before transitioning.
 - Run `harness validate <session-id>` before any transition.
 
@@ -694,7 +712,8 @@ Forbidden:
 Exits:
 
 ```bash
-# return through implementation after fixes are complete
+# after edits are complete and relevant checklist items are checked,
+# return through implementation
 harness transition <session-id> implementation
 
 # or stop automation if the recovery cannot be completed
@@ -721,11 +740,12 @@ On entry:
 3. Only after explicit user approval, run:
 
 ```bash
-harness approve-quality <session-id> --by <human-name>
+harness approve-quality <session-id>
 harness transition <session-id> done
 ```
 
 Agents must not run `approve-quality` unless the user explicitly instructs them to approve quality evidence.
+`approve-quality` uses `whoami` for the approver name by default; pass `--by <human-name>` only to override it.
 
 Forbidden:
 
@@ -862,7 +882,7 @@ def non_harness_changes() -> list[str]:
             path = path.split(" -> ", 1)[1]
         if not path:
             continue
-        if path.startswith(".harness/") or path in {"AGENTS.md", ".env.example"}:
+        if path.startswith(".harness/") or path in {"AGENTS.md", ".env.example", ".gitignore"}:
             continue
         changes.append(path)
     return changes
@@ -1921,9 +1941,9 @@ def validate_requirements(
     if check_state in {"implementation", "review", "quality-check", "approval", "done"}:
         approval = latest_approval(session_id, "planning")
         if not approval:
-            missing.append("Planning must be human-approved with `harness approve-planning <session-id> --by <name>`")
+            missing.append("Planning must be human-approved with `harness approve-planning <session-id>`")
         elif approval["approval_hash"] != planning_snapshot(text):
-            missing.append("Planning sections changed after approval; rerun `harness approve-planning <session-id> --by <name>`")
+            missing.append("Planning sections changed after approval; rerun `harness approve-planning <session-id>`")
 
     if check_state == "implementation" and state in {"implementation", "needs-fix"}:
         if non_harness_changes() and has_unchecked_item(implementation_checklist):
@@ -1943,7 +1963,7 @@ def validate_requirements(
         if unresolved_required_fixes(session_id):
             missing.append("Review Required Fixes must be resolved before quality-check")
         if not latest_approval(session_id, "review"):
-            missing.append("Human review must be approved with `harness approve-review <session-id> --by <name>`")
+            missing.append("Human review must be approved with `harness approve-review <session-id>`")
 
     if check_state == "done":
         quality = section(text, "Quality Check")
@@ -1951,9 +1971,9 @@ def validate_requirements(
             missing.append("Quality Check Proof needs at least one checked proof file under proof/")
         approval = latest_approval(session_id, "quality")
         if not approval:
-            missing.append("Quality evidence must be approved with `harness approve-quality <session-id> --by <name>`")
+            missing.append("Quality evidence must be approved with `harness approve-quality <session-id>`")
         elif approval["approval_hash"] != quality_snapshot(text):
-            missing.append("Quality evidence changed after approval; rerun `harness approve-quality <session-id> --by <name>`")
+            missing.append("Quality evidence changed after approval; rerun `harness approve-quality <session-id>`")
         if not has_real_content(section(text, "Final Approval")):
             missing.append("Final Approval must be recorded")
 
@@ -1971,6 +1991,16 @@ def validate_requirements(
     if state not in STATES:
         missing.append(f"status must be one of: {', '.join(STATES)}")
     return missing
+
+
+def validate_planning_approval(session_id: str) -> list[str]:
+    text = read_text(artifact_path(session_id))
+    approval = latest_approval(session_id, "planning")
+    if not approval:
+        return ["Planning must be human-approved with `harness approve-planning <session-id>`"]
+    if approval["approval_hash"] != planning_snapshot(text):
+        return ["Planning sections changed after approval; rerun `harness approve-planning <session-id>`"]
+    return []
 
 
 def cmd_init(_args: argparse.Namespace) -> None:
@@ -2218,7 +2248,10 @@ def cmd_preflight_edit(args: argparse.Namespace) -> None:
     state = current_state(args.session_id)
     if state not in {"implementation", "needs-fix"}:
         die(f"product code edits blocked while session is in '{state}'. Complete planning and transition to implementation first.")
-    missing = validate_requirements(args.session_id, "implementation")
+    if state == "needs-fix":
+        missing = validate_planning_approval(args.session_id)
+    else:
+        missing = validate_requirements(args.session_id, "implementation")
     if missing:
         print("edit preflight blocked")
         for item in missing:
@@ -2228,6 +2261,7 @@ def cmd_preflight_edit(args: argparse.Namespace) -> None:
 
 
 def cmd_approve_planning(args: argparse.Namespace) -> None:
+    approver = default_approval_name(args.by)
     state = current_state(args.session_id)
     if state != "planning":
         die(f"planning approval requires session state 'planning', current state is '{state}'")
@@ -2239,7 +2273,7 @@ def cmd_approve_planning(args: argparse.Namespace) -> None:
         raise SystemExit(1)
     path = artifact_path(args.session_id)
     text = read_text(path)
-    approval = f"Approved by {args.by} at {now()}."
+    approval = f"Approved by {approver} at {now()}."
     text = check_section_items(text, "Acceptance Criteria")
     if "## Planning Approval\n\nTBD" in text:
         text = text.replace("## Planning Approval\n\nTBD", f"## Planning Approval\n\n{approval}")
@@ -2248,16 +2282,17 @@ def cmd_approve_planning(args: argparse.Namespace) -> None:
         args.session_id,
         {
             "planning_approved": "true",
-            "planning_approved_by": args.by,
+            "planning_approved_by": approver,
             "planning_approved_at": now(),
             "planning_approved_hash": planning_snapshot(read_text(path)),
         },
     )
-    insert_approval(args.session_id, "planning", args.by, planning_snapshot(read_text(path)))
-    print(f"planning approved by {args.by}")
+    insert_approval(args.session_id, "planning", approver, planning_snapshot(read_text(path)))
+    print(f"planning approved by {approver}")
 
 
 def cmd_approve_review(args: argparse.Namespace) -> None:
+    approver = default_approval_name(args.by)
     state = current_state(args.session_id)
     if state != "review":
         die(f"review approval requires session state 'review', current state is '{state}'")
@@ -2269,7 +2304,7 @@ def cmd_approve_review(args: argparse.Namespace) -> None:
         raise SystemExit(1)
     path = artifact_path(args.session_id)
     text = read_text(path)
-    approval = f"Approved by {args.by} at {now()}."
+    approval = f"Approved by {approver} at {now()}."
     review_text = section(text, "Review")
     human_review = subsection(review_text, "Human Review")
     if not has_real_content(human_review):
@@ -2279,15 +2314,16 @@ def cmd_approve_review(args: argparse.Namespace) -> None:
         args.session_id,
         {
             "review_approved": "true",
-            "review_approved_by": args.by,
+            "review_approved_by": approver,
             "review_approved_at": now(),
         },
     )
-    insert_approval(args.session_id, "review", args.by, "")
-    print(f"review approved by {args.by}")
+    insert_approval(args.session_id, "review", approver, "")
+    print(f"review approved by {approver}")
 
 
 def cmd_approve_quality(args: argparse.Namespace) -> None:
+    approver = default_approval_name(args.by)
     state = current_state(args.session_id)
     if state != "approval":
         die(f"quality approval requires session state 'approval', current state is '{state}'")
@@ -2300,19 +2336,19 @@ def cmd_approve_quality(args: argparse.Namespace) -> None:
     path = artifact_path(args.session_id)
     text = read_text(path)
     approval_time = now()
-    approval = f"Approved by {args.by} at {approval_time}."
+    approval = f"Approved by {approver} at {approval_time}."
     text = replace_section(text, "Final Approval", approval)
     path.write_text(text)
     update_artifact_meta(
         args.session_id,
         {
             "quality_approved": "true",
-            "quality_approved_by": args.by,
+            "quality_approved_by": approver,
             "quality_approved_at": approval_time,
         },
     )
-    insert_approval(args.session_id, "quality", args.by, quality_snapshot(read_text(path)))
-    print(f"quality approved by {args.by}")
+    insert_approval(args.session_id, "quality", approver, quality_snapshot(read_text(path)))
+    print(f"quality approved by {approver}")
 
 
 def cmd_record_review(args: argparse.Namespace) -> None:
@@ -2619,17 +2655,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     approve_p = sub.add_parser("approve-planning")
     approve_p.add_argument("session_id")
-    approve_p.add_argument("--by", required=True)
+    approve_p.add_argument("--by")
     approve_p.set_defaults(func=cmd_approve_planning)
 
     approve_review_p = sub.add_parser("approve-review")
     approve_review_p.add_argument("session_id")
-    approve_review_p.add_argument("--by", required=True)
+    approve_review_p.add_argument("--by")
     approve_review_p.set_defaults(func=cmd_approve_review)
 
     approve_quality_p = sub.add_parser("approve-quality")
     approve_quality_p.add_argument("session_id")
-    approve_quality_p.add_argument("--by", required=True)
+    approve_quality_p.add_argument("--by")
     approve_quality_p.set_defaults(func=cmd_approve_quality)
 
     record_review_p = sub.add_parser("record-review")

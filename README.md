@@ -87,11 +87,12 @@ Move state:
 
 ```bash
 bin/harness transition req-login-timeout planning
-bin/harness approve-planning req-login-timeout --by "Liem"
+bin/harness approve-planning req-login-timeout
 bin/harness transition req-login-timeout implementation
 ```
 
 `planning -> implementation` requires explicit planning approval. Agents must not run `approve-planning` unless the user explicitly approves the plan.
+Approval commands use `whoami` for the approver name by default. Pass `--by "Name"` only when you need to override it.
 
 `approve-planning` marks `## Acceptance Criteria` items checked as requirement approval, then locks a hash of Requirement Summary, Acceptance Criteria, Validation Plan content, and Implementation Guidance. If those planning sections change after approval, implementation/edit gates block until planning is approved again. Validation Plan and Implementation Checklist remain execution checklists; checking validation or implementation items during execution does not invalidate planning approval.
 
@@ -102,7 +103,7 @@ After implementation, move to review and stop for human review:
 ```bash
 bin/harness transition req-login-timeout review
 bin/harness record-review req-login-timeout --file review.md
-bin/harness approve-review req-login-timeout --by "Liem"
+bin/harness approve-review req-login-timeout
 bin/harness transition req-login-timeout quality-check
 ```
 
@@ -120,7 +121,7 @@ After quality evidence is complete, transition to `approval` and stop for human 
 
 ```bash
 bin/harness transition req-login-timeout approval
-bin/harness approve-quality req-login-timeout --by "Liem"
+bin/harness approve-quality req-login-timeout
 bin/harness transition req-login-timeout done
 ```
 

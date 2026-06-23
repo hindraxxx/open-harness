@@ -390,6 +390,31 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("non-harness changes already exist before implementation gate", result.stdout)
             self.assertNotIn("Implementation Checklist has unchecked items", result.stdout)
 
+    def test_approve_planning_defaults_to_whoami(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            self.run_cli(cwd, "start", "req-login-timeout")
+            artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
+            text = artifact.read_text()
+            text = text.replace("TBD", "Download Neraca as Excel", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Acceptance exists", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Validation exists", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Implementation task", 1)
+            artifact.write_text(self.with_guidance(text))
+
+            self.run_cli(cwd, "transition", "req-login-timeout", "planning")
+            result = self.run_cli(cwd, "approve-planning", "req-login-timeout")
+            expected_name = subprocess.run(
+                ["whoami"],
+                text=True,
+                stdout=subprocess.PIPE,
+                check=True,
+            ).stdout.strip()
+
+            self.assertIn(f"planning approved by {expected_name}", result.stdout)
+            self.assertIn(f'planning_approved_by: "{expected_name}"', artifact.read_text())
+
     def test_planning_status_reports_missing_planning_sections(self):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)
@@ -644,6 +669,37 @@ class HarnessCliTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("Implementation Checklist has unchecked items while product changes exist", result.stdout)
 
+    def test_modified_gitignore_does_not_count_as_product_change(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            subprocess.run(["git", "init"], cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+            self.run_cli(cwd, "init")
+            subprocess.run(["git", "add", ".gitignore"], cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+            subprocess.run(
+                ["git", "commit", "-m", "seed gitignore"],
+                cwd=cwd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+                env={**os.environ, "GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.com", "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@example.com"},
+            )
+            self.run_cli(cwd, "start", "req-login-timeout")
+            artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
+            text = artifact.read_text()
+            text = text.replace("TBD", "Download Neraca as Excel", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Acceptance exists", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Validation exists", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Implementation task", 1)
+            artifact.write_text(self.with_guidance(text))
+
+            self.run_cli(cwd, "transition", "req-login-timeout", "planning")
+            self.run_cli(cwd, "approve-planning", "req-login-timeout", "--by", "Liem")
+            self.run_cli(cwd, "transition", "req-login-timeout", "implementation")
+            (cwd / ".gitignore").write_text((cwd / ".gitignore").read_text() + "local.tmp\n")
+            result = self.run_cli(cwd, "validate", "req-login-timeout")
+
+            self.assertIn("valid", result.stdout)
+
     def test_review_transition_requires_full_implementation_checklist(self):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)
@@ -742,6 +798,34 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("transitioned: review -> needs-fix", result.stdout)
             self.assertIn('status: "needs-fix"', artifact.read_text())
             self.assertIn('recovery_attempts: "1"', artifact.read_text())
+
+    def test_needs_fix_preflight_allows_fix_work_with_unchecked_items_and_product_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            artifact = self.enter_review(cwd)
+            self.run_cli(cwd, "recover", "req-login-timeout", "--reason", "open review item")
+            artifact.write_text(artifact.read_text().replace("- [x] Implementation complete", "- [ ] Implementation complete"))
+            (cwd / "app.py").write_text("fix in progress\n")
+
+            result = self.run_cli(cwd, "preflight-edit", "req-login-timeout")
+
+            self.assertIn("edit preflight allowed", result.stdout)
+
+    def test_needs_fix_transition_to_implementation_stays_strict_until_checklist_done(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            artifact = self.enter_review(cwd)
+            self.run_cli(cwd, "recover", "req-login-timeout", "--reason", "open review item")
+            artifact.write_text(artifact.read_text().replace("- [x] Implementation complete", "- [ ] Implementation complete"))
+            (cwd / "app.py").write_text("fix in progress\n")
+
+            blocked = self.run_cli(cwd, "transition", "req-login-timeout", "implementation", check=False)
+            artifact.write_text(artifact.read_text().replace("- [ ] Implementation complete", "- [x] Implementation complete"))
+            allowed = self.run_cli(cwd, "transition", "req-login-timeout", "implementation")
+
+            self.assertNotEqual(blocked.returncode, 0)
+            self.assertIn("Implementation Checklist has unchecked items while product changes exist", blocked.stdout)
+            self.assertIn("transitioned: needs-fix -> implementation", allowed.stdout)
 
     def test_history_reports_audit_trail(self):
         with tempfile.TemporaryDirectory() as tmp:
