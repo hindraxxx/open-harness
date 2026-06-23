@@ -211,6 +211,8 @@ class HarnessCliTest(unittest.TestCase):
             html_text = html_artifact.read_text()
             self.assertIn("Harness Artifact: req-login-timeout", html_text)
             self.assertIn("<h2>Implementation Guidance</h2>", html_text)
+            self.assertIn('<div class="mermaid">sequenceDiagram', html_text)
+            self.assertIn("cdn.jsdelivr.net/npm/mermaid", html_text)
             with sqlite3.connect(cwd / ".harness" / "harness.db") as conn:
                 row = conn.execute("SELECT state FROM sessions WHERE session_id = ?", ("req-login-timeout",)).fetchone()
             self.assertEqual(("start",), row)
@@ -225,7 +227,24 @@ class HarnessCliTest(unittest.TestCase):
             artifact.write_text(
                 artifact.read_text().replace(
                     "## Requirement Summary\n\nTBD",
-                    "## Requirement Summary\n\nReview <script>alert('x')</script> safely.",
+                    "\n".join(
+                        [
+                            "## Requirement Summary",
+                            "",
+                            "Review <script>alert('x')</script> safely.",
+                            "",
+                            "```python",
+                            "print('<safe>')",
+                            "```",
+                            "",
+                            "```mermaid",
+                            "sequenceDiagram",
+                            "    participant Client",
+                            "    participant ReportService",
+                            "    Client->>ReportService: render diagram",
+                            "```",
+                        ]
+                    ),
                     1,
                 )
             )
@@ -236,6 +255,10 @@ class HarnessCliTest(unittest.TestCase):
             html_text = html_artifact.read_text()
             self.assertIn("Review &lt;script&gt;alert(&#x27;x&#x27;)&lt;/script&gt; safely.", html_text)
             self.assertNotIn("<script>alert", html_text)
+            self.assertIn('<code class="language-python">print(&#x27;&lt;safe&gt;&#x27;)</code>', html_text)
+            self.assertIn('<div class="mermaid">sequenceDiagram', html_text)
+            self.assertIn("Client-&gt;&gt;ReportService: render diagram", html_text)
+            self.assertIn("mermaid.initialize", html_text)
 
     def test_list_reports_no_sessions(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -331,6 +354,28 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("- [x] Acceptance: download flow works", approved_text)
             self.assertIn("- [ ] Validate download flow", approved_text)
             self.assertIn("- [ ] Implement download flow", approved_text)
+
+    def test_planning_to_implementation_does_not_require_checked_implementation_items(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            self.run_cli(cwd, "start", "req-login-timeout")
+            artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
+            text = artifact.read_text()
+            text = text.replace("TBD", "Download Neraca as Excel", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Acceptance exists", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Validation exists", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Implementation task", 1)
+            artifact.write_text(self.with_guidance(text))
+            (cwd / "app.py").write_text("changed before implementation\n")
+
+            self.run_cli(cwd, "transition", "req-login-timeout", "planning")
+            self.run_cli(cwd, "approve-planning", "req-login-timeout", "--by", "Liem")
+            result = self.run_cli(cwd, "transition", "req-login-timeout", "implementation", check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("non-harness changes already exist before implementation gate", result.stdout)
+            self.assertNotIn("Implementation Checklist has unchecked items", result.stdout)
 
     def test_planning_status_reports_missing_planning_sections(self):
         with tempfile.TemporaryDirectory() as tmp:

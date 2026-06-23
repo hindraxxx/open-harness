@@ -941,6 +941,7 @@ def render_markdown_body(body: str) -> str:
     list_items = []
     table_lines = []
     code_lines = []
+    code_language = ""
     in_code = False
 
     def flush_paragraph() -> None:
@@ -958,6 +959,15 @@ def render_markdown_body(body: str) -> str:
             parts.append(render_markdown_table(table_lines))
             table_lines.clear()
 
+    def render_code_block(language: str, lines: list[str]) -> str:
+        content = html.escape("\n".join(lines))
+        normalized_language = re.sub(r"[^a-zA-Z0-9_-]", "", language.strip().lower())
+        if normalized_language == "mermaid":
+            return f'<div class="mermaid">{content}</div>'
+        if normalized_language:
+            return f'<pre><code class="language-{html.escape(normalized_language, quote=True)}">{content}</code></pre>'
+        return f"<pre><code>{content}</code></pre>"
+
     for raw_line in body.splitlines():
         line = raw_line.rstrip()
         stripped = line.strip()
@@ -966,11 +976,13 @@ def render_markdown_body(body: str) -> str:
             flush_list()
             flush_table()
             if in_code:
-                parts.append(f"<pre><code>{html.escape(chr(10).join(code_lines))}</code></pre>")
+                parts.append(render_code_block(code_language, code_lines))
                 code_lines.clear()
+                code_language = ""
                 in_code = False
             else:
                 in_code = True
+                code_language = stripped[3:].strip()
             continue
         if in_code:
             code_lines.append(line)
@@ -1009,7 +1021,7 @@ def render_markdown_body(body: str) -> str:
         paragraph.append(stripped)
 
     if in_code:
-        parts.append(f"<pre><code>{html.escape(chr(10).join(code_lines))}</code></pre>")
+        parts.append(render_code_block(code_language, code_lines))
     flush_paragraph()
     flush_list()
     flush_table()
@@ -1114,6 +1126,19 @@ code {{
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 0.92em;
 }}
+.mermaid {{
+  overflow-x: auto;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  margin: 1rem 0;
+  padding: 16px;
+}}
+.mermaid svg {{
+  display: block;
+  margin: 0 auto;
+  max-width: 100%;
+}}
 table {{
   width: 100%;
   border-collapse: collapse;
@@ -1210,6 +1235,10 @@ th {{
 </aside>
 </div>
 </main>
+<script type="module">
+import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
+mermaid.initialize({{ startOnLoad: true, securityLevel: "strict", theme: "default" }});
+</script>
 </body>
 </html>
 """
@@ -1892,7 +1921,7 @@ def validate_requirements(
         elif approval["approval_hash"] != planning_snapshot(text):
             missing.append("Planning sections changed after approval; rerun `harness approve-planning <session-id> --by <name>`")
 
-    if check_state == "implementation":
+    if check_state == "implementation" and state in {"implementation", "needs-fix"}:
         if non_harness_changes() and has_unchecked_item(implementation_checklist):
             missing.append("Implementation Checklist has unchecked items while product changes exist")
 
