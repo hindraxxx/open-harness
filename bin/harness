@@ -1119,14 +1119,14 @@ body {{
   line-height: 1.55;
 }}
 main {{
-  width: min(1180px, calc(100% - 40px));
+  width: min(1380px, calc(100% - 40px));
   margin: 0 auto;
   padding: 34px 0 64px;
 }}
 .artifact-shell {{
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 300px;
-  gap: 28px;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: 22px;
   align-items: start;
 }}
 .hero {{
@@ -1159,9 +1159,14 @@ h2 {{
   padding-top: 1.35rem;
 }}
 h3 {{ font-size: 1.1rem; }}
-p, li {{ font-size: 0.98rem; }}
+p, li {{
+  font-size: 0.98rem;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}}
 p {{ margin: 0.7rem 0; max-width: 76ch; }}
 ul {{ padding-left: 1.15rem; }}
+ol {{ padding-left: 1.35rem; }}
 li {{ margin: 0.35rem 0; }}
 a {{ color: #0f5f66; font-weight: 650; }}
 pre {{
@@ -1175,6 +1180,14 @@ pre {{
 code {{
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 0.92em;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  word-break: break-word;
+}}
+pre code {{
+  overflow-wrap: normal;
+  white-space: pre;
+  word-break: normal;
 }}
 .mermaid {{
   overflow-x: auto;
@@ -1285,6 +1298,8 @@ th, td {{
   padding: 9px 11px;
   text-align: left;
   vertical-align: top;
+  overflow-wrap: anywhere;
+  word-break: normal;
 }}
 tr:last-child th, tr:last-child td {{ border-bottom: 0; }}
 th {{
