@@ -54,9 +54,16 @@ sequenceDiagram
 
 TBD
 
-### Decision Table
+### Decision Flow
 
-TBD
+```mermaid
+flowchart TD
+    Start([Input or event]) --> Check{Decision condition}
+    Check -->|Case A| CaseA[Expected behavior A]
+    Check -->|Case B| CaseB[Expected behavior B]
+    CaseA --> Result[Observable result]
+    CaseB --> Result
+```
 
 ### Code Anchors
 

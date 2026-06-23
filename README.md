@@ -1,239 +1,89 @@
 # Workflow Project Harness
 
-Local harness orchestrator for agent-driven engineering workflows.
-
-Model:
-
-- Agent calls the CLI.
-- CLI manages local SQLite state, session artifacts, and transition gates.
-- SQLite is canonical for orchestration state.
-- Markdown remains the human-readable agent artifact.
+Local CLI harness for agent-driven engineering workflows. It creates `.harness/` files in a repo, tracks session state in local SQLite, and gives agents guardrails for planning, implementation, review, and quality checks.
 
 ## Install
+
+Clone this repo somewhere stable:
+
+```bash
+git clone <workflow-project-repo-url> ~/workflow-project
+chmod +x ~/workflow-project/bin/harness
+```
+
+Use it directly from any project:
+
+```bash
+~/workflow-project/bin/harness init
+```
+
+Recommended: symlink it into your system path:
+
+```bash
+sudo ln -sf ~/workflow-project/bin/harness /usr/local/bin/harness
+```
+
+## Start A Session
+
+From your target repo:
+
+```bash
+harness init
+harness start user-consent-request-id
+harness status user-consent-request-id
+```
+
+Then tell your agent the session id:
+
+```text
+Use harness session user-consent-request-id.
+```
+
+If no session exists, the guardrails allow the agent to choose a short kebab-case session id and run `harness start <session-id>` itself.
+
+Useful commands:
+
+```bash
+harness list
+harness status <session-id>
+harness validate <session-id>
+harness preflight-edit <session-id>
+harness history <session-id>
+```
+
+HTML artifacts regenerate when you run commands such as `harness status <session-id>` or a passing `harness validate <session-id>`.
+
+## Update The CLI
+
+Update the harness source repo:
+
+```bash
+cd ~/workflow-project
+git pull
+chmod +x bin/harness
+```
+
+If you use `PATH` or a symlink, your projects now use the updated CLI automatically.
+
+If you copied `bin/harness` into another location, replace that copy after pulling.
+
+## Update Existing Projects
+
+After updating the CLI, refresh each target repo's guardrails:
+
+```bash
+cd /path/to/target-repo
+harness sync-guardrails --force
+```
+
+Notes:
+
+- `harness sync-guardrails --force` overwrites agent guardrail files and bootstrap instructions.
+
+## Test
 
 From this repo:
 
 ```bash
-chmod +x bin/harness
-```
-
-Optional shell path:
-
-```bash
-export PATH="$PWD/bin:$PATH"
-```
-
-From another project, clone or add this repo as a tool source, then run the CLI with an absolute path:
-
-```bash
-/path/to/workflow-project/bin/harness init
-```
-
-You can also symlink it:
-
-```bash
-ln -sf /path/to/workflow-project/bin/harness /usr/local/bin/harness
-```
-
-## Usage
-
-Initialize harness files:
-
-```bash
-bin/harness init
-```
-
-This creates `.harness/harness.db`, templates, guardrails, and project map files. The SQLite DB is local-only and ignored by git.
-
-Create a session:
-
-```bash
-bin/harness start req-login-timeout
-```
-
-List sessions:
-
-```bash
-bin/harness list
-```
-
-Check status and guardrails:
-
-```bash
-bin/harness status req-login-timeout
-```
-
-Inspect session audit history:
-
-```bash
-bin/harness history req-login-timeout
-```
-
-Validate the current state:
-
-```bash
-bin/harness validate req-login-timeout
-```
-
-Before editing product code, verify the edit gate:
-
-```bash
-bin/harness preflight-edit req-login-timeout
-```
-
-This exits non-zero unless the session is in `implementation` or `needs-fix` and the implementation gate requirements are satisfied.
-
-Move state:
-
-```bash
-bin/harness transition req-login-timeout planning
-bin/harness approve-planning req-login-timeout
-bin/harness transition req-login-timeout implementation
-```
-
-`planning -> implementation` requires explicit planning approval. Agents must not run `approve-planning` unless the user explicitly approves the plan.
-Approval commands use `whoami` for the approver name by default. Pass `--by "Name"` only when you need to override it.
-
-`approve-planning` marks `## Acceptance Criteria` items checked as requirement approval, then locks a hash of Requirement Summary, Acceptance Criteria, Validation Plan content, and Implementation Guidance. If those planning sections change after approval, implementation/edit gates block until planning is approved again. Validation Plan and Implementation Checklist remain execution checklists; checking validation or implementation items during execution does not invalidate planning approval.
-
-Planning must include concrete handoff details inside `## Implementation Guidance`: a `### Overall Flow` Mermaid `sequenceDiagram` showing the end-to-end request/data flow across the client, MVC/DDD layers, infrastructure, persistence, and external calls, with participants labeled by exact discovered files/classes/modules where possible; a `### Implementation Sketch` containing all pseudocode, sample function shapes, and code-shape steps; a `### Decision Table` mapping important branches or input states to expected behavior; and `### Code Anchors` naming exact existing variables, conditions, helpers, or call sites. This is intentionally required so lower-capability implementation agents can execute the approved approach directly instead of re-planning.
-
-After implementation, move to review and stop for human review:
-
-```bash
-bin/harness transition req-login-timeout review
-bin/harness record-review req-login-timeout --file review.md
-bin/harness approve-review req-login-timeout
-bin/harness transition req-login-timeout quality-check
-```
-
-`review -> quality-check` requires explicit human review approval. Agents must not run `approve-review` unless the user explicitly approves the review.
-
-In `review`, agents must persist AI review output with `harness record-review` before responding. A chat-only review is incomplete. AI findings are advisory until the human decides. Use `--required-fix` only for human-selected fixes that must block `review -> quality-check`.
-
-During `implementation`, every item in `## Implementation Checklist` must be checked before review. If product files changed while checklist items remain unchecked, `harness status` and `harness validate` report the missing checklist work.
-
-Implementation must not run quality validation. If `## Quality Check` commands/proof/manual validation are recorded before the session reaches `quality-check`, `harness status` and `harness validate` report a phase violation.
-
-Inside `quality-check`, the agent must execute the artifact `## Validation Plan`, check off completed validation items, record commands/results under `## Quality Check > Commands Run`, and attach proof with `harness attach-proof`. `harness status` and `harness validate` report missing quality evidence until a checked proof link resolves to a file under the session `proof/` directory.
-
-After quality evidence is complete, transition to `approval` and stop for human quality approval:
-
-```bash
-bin/harness transition req-login-timeout approval
-bin/harness approve-quality req-login-timeout
-bin/harness transition req-login-timeout done
-```
-
-`quality-check -> approval` requires validation execution, recorded commands/results, and attached proof. `approval -> done` requires explicit human quality approval. Agents must not run `approve-quality` unless the user explicitly approves the quality evidence. If quality evidence is rejected and recovery goes through `needs-fix`, prior quality approval is cleared and `## Final Approval` returns to `TBD`.
-
-Quality proof policy is configured in `.harness/harness.yml`:
-
-```yaml
-quality_gate:
-  required_proof: auto
-```
-
-Supported values:
-
-- `auto`: infer backend/frontend expectations from the validation plan and project map.
-- `backend`: require a curl command and sample response/status.
-- `frontend`: require screenshot proof and view/browser validation notes.
-- `both`: require backend and frontend proof.
-- `manual`: require only generic commands/results and attached proof.
-
-Attach proof:
-
-```bash
-bin/harness attach-proof req-login-timeout ./proof-output.txt
-```
-
-Check local harness integrity:
-
-```bash
-bin/harness doctor
-```
-
-If the harness scaffold exists but the local SQLite DB has not been created yet, `doctor` initializes `.harness/harness.db` before running integrity checks.
-
-Migrate existing Markdown-only sessions into SQLite:
-
-```bash
-bin/harness migrate-sqlite
-```
-
-If SQLite and Markdown frontmatter disagree, SQLite is canonical. `doctor` reports mirror mismatches.
-
-## Upgrade Existing Projects
-
-If a project already ran an older harness version, create the local SQLite DB, import existing sessions, and refresh guardrails:
-
-```bash
-harness init
-harness migrate-sqlite
-harness sync-guardrails --force
-harness doctor
-```
-
-`harness init` does not overwrite existing non-empty templates or project maps. New sessions created from legacy templates automatically strip old Linear metadata fields.
-
-Use `sync-guardrails --force` after CLI upgrades. It overwrites only the agent guardrail files and the bootstrap file. In normal child repositories that bootstrap file is `AGENTS.md`; in this workflow-project repository the source sample is `AGENTS_SAMPLE.md`.
-
-Legacy alias:
-
-```bash
-harness upgrade-guardrails
-```
-
-## Project Map
-
-Project maps give agents a compact repo orientation before planning. They are not authority; current code always wins and agents must verify relevant facts by repo search.
-
-Create missing map files:
-
-```bash
-harness init-project-map
-```
-
-This creates:
-
-```text
-.harness/project/
-  overview.md
-  architecture.md
-  conventions.md
-  validation.md
-  risks.md
-  index.md
-```
-
-Refresh the bundled project-map templates:
-
-```bash
-harness sync-project-map --force
-```
-
-This overwrites `.harness/project/*.md` templates only. It does not touch session artifacts under `.harness/sessions/`.
-
-## Agent Flow
-
-Tell an agent the session id, or let the agent create one if no session exists. The agent should:
-
-1. Read the repository bootstrap instructions. Normal child repositories use `AGENTS.md`; this workflow-project repository keeps the source sample in `AGENTS_SAMPLE.md`.
-2. Identify the session id from the user request, current artifact, or `bin/harness list`.
-3. If no session exists, choose a short kebab-case session id that summarizes the request and run `bin/harness start <session-id>`.
-4. Run `bin/harness status <session-id>`.
-5. Read `.harness/agents/common.md`.
-6. Read `.harness/project/index.md` when present.
-7. Read the state guardrail printed by status.
-8. In `implementation`, read `## Implementation Guidance`, inspect `### Overall Flow`, then follow `### Implementation Sketch`, `### Decision Table`, and `### Code Anchors` before editing.
-9. Run `bin/harness preflight-edit <session-id>` before product code edits.
-10. Work within that state only.
-
-## Test
-
-Run:
-
-```bash
-python3 -m unittest discover -s tests
+python3 tests/test_harness_cli.py
 ```

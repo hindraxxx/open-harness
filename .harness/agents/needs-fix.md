@@ -11,7 +11,7 @@ On entry:
    - failed unit tests / build: `## Implementation Checklist` and `## Implementation Guidance`.
    - review fixes: `## Review > Required Fixes`.
    - quality failures: `## Validation Plan` and `## Quality Check > Commands Run`.
-3. Re-read `### Overall Flow`, `### Implementation Sketch`, `### Decision Table`, and `### Code Anchors`
+3. Re-read `### Overall Flow`, `### Implementation Sketch`, `### Decision Flow`, and `### Code Anchors`
    before changing branch behavior.
 
 Before editing product code, run:

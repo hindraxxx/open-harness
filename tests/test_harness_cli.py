@@ -65,7 +65,15 @@ class HarnessCliTest(unittest.TestCase):
             "    FileA_Controller-->>Client: response\n"
             "```\n\n"
             "### Implementation Sketch\n\nTBD\n\n"
-            "### Decision Table\n\nTBD\n\n"
+            "### Decision Flow\n\n"
+            "```mermaid\n"
+            "flowchart TD\n"
+            "    Start([Input or event]) --> Check{Decision condition}\n"
+            "    Check -->|Case A| CaseA[Expected behavior A]\n"
+            "    Check -->|Case B| CaseB[Expected behavior B]\n"
+            "    CaseA --> Result[Observable result]\n"
+            "    CaseB --> Result\n"
+            "```\n\n"
             "### Code Anchors\n\nTBD"
         )
 
@@ -95,11 +103,16 @@ class HarnessCliTest(unittest.TestCase):
                 "",
                 "Pseudocode: preserve existing successful flow and apply the scoped behavior change only.",
                 "",
-                "### Decision Table",
+                "### Decision Flow",
                 "",
-                "| Branch | Expected behavior |",
-                "| --- | --- |",
-                "| Existing successful flow | Apply only the scoped behavior change |",
+                "```mermaid",
+                "flowchart TD",
+                "    Start([Existing successful flow]) --> Scoped{Scoped behavior applies?}",
+                "    Scoped -->|Yes| Changed[Apply scoped behavior change]",
+                "    Scoped -->|No| Preserve[Preserve existing behavior]",
+                "    Changed --> Result[Return expected response]",
+                "    Preserve --> Result",
+                "```",
                 "",
                 "### Code Anchors",
                 "",
@@ -499,11 +512,12 @@ class HarnessCliTest(unittest.TestCase):
                         "",
                         "Pseudocode: change the selected branch only.",
                         "",
-                        "### Decision Table",
+                        "### Decision Flow",
                         "",
-                        "| Branch | Expected behavior |",
-                        "| --- | --- |",
-                        "| Existing flow | Preserve |",
+                        "```mermaid",
+                        "flowchart TD",
+                        "    Start([Existing flow]) --> Preserve[Preserve]",
+                        "```",
                         "",
                         "### Code Anchors",
                         "",
@@ -552,11 +566,12 @@ class HarnessCliTest(unittest.TestCase):
                         "",
                         "Pseudocode: change the selected branch only.",
                         "",
-                        "### Decision Table",
+                        "### Decision Flow",
                         "",
-                        "| Branch | Expected behavior |",
-                        "| --- | --- |",
-                        "| Existing flow | Preserve |",
+                        "~~~mermaid",
+                        "flowchart TD",
+                        "    Start([Existing flow]) --> Preserve[Preserve]",
+                        "~~~",
                         "",
                         "### Code Anchors",
                         "",
@@ -573,7 +588,7 @@ class HarnessCliTest(unittest.TestCase):
 
             self.assertIn("planning approved by Liem", result.stdout)
 
-    def test_approve_planning_requires_decision_table_and_code_anchors(self):
+    def test_approve_planning_requires_decision_flow_and_code_anchors(self):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)
             self.run_cli(cwd, "init")
@@ -614,7 +629,7 @@ class HarnessCliTest(unittest.TestCase):
             result = self.run_cli(cwd, "approve-planning", "req-login-timeout", "--by", "Liem", check=False)
 
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("Implementation Guidance must include a Decision Table", result.stdout)
+            self.assertIn("Implementation Guidance must include a Decision Flow Mermaid flowchart", result.stdout)
 
     def test_planning_changes_after_approval_block_preflight(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1097,13 +1112,13 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("When revising `## Implementation Guidance`, re-check `### Overall Flow`", planning_text)
             self.assertNotIn("Focused Changes Flow", planning_text)
             self.assertIn("Implementation Sketch", planning_text)
-            self.assertIn("Decision Table", planning_text)
+            self.assertIn("Decision Flow", planning_text)
             self.assertIn("Code Anchors", planning_text)
             implementation_text = (cwd / ".harness" / "agents" / "implementation.md").read_text()
             self.assertIn("Read `### Overall Flow`", implementation_text)
             self.assertNotIn("Focused Changes Flow", implementation_text)
             self.assertIn("Follow the `### Implementation Sketch`", implementation_text)
-            self.assertIn("Use `### Decision Table`", implementation_text)
+            self.assertIn("Use `### Decision Flow`", implementation_text)
             self.assertIn("Use `### Code Anchors`", implementation_text)
             self.assertTrue((cwd / ".harness" / "agents" / "needs-fix.md").exists())
             needs_fix_text = (cwd / ".harness" / "agents" / "needs-fix.md").read_text()
