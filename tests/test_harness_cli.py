@@ -1,4 +1,5 @@
 import os
+import shutil
 import sqlite3
 import subprocess
 import tempfile
@@ -46,6 +47,60 @@ class HarnessCliTest(unittest.TestCase):
         if check and result.returncode != 0:
             self.fail(f"command failed: {args}\nstdout={result.stdout}\nstderr={result.stderr}")
         return result
+
+    def run_temp_cli(
+        self,
+        cli: Path,
+        cwd: Path,
+        *args: str,
+        check: bool = True,
+    ) -> subprocess.CompletedProcess:
+        result = subprocess.run(
+            [str(cli), *args],
+            cwd=cwd,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if check and result.returncode != 0:
+            self.fail(f"command failed: {args}\nstdout={result.stdout}\nstderr={result.stderr}")
+        return result
+
+    def git(self, cwd: Path, *args: str) -> subprocess.CompletedProcess:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=cwd,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if result.returncode != 0:
+            self.fail(f"git failed: {args}\nstdout={result.stdout}\nstderr={result.stderr}")
+        return result
+
+    def make_harness_git_fixture(self, tmp: Path) -> tuple[Path, Path]:
+        seed = tmp / "seed"
+        origin = tmp / "origin.git"
+        source = tmp / "source"
+        seed.mkdir()
+        (seed / "bin").mkdir()
+        shutil.copy2(CLI, seed / "bin" / "harness")
+        os.chmod(seed / "bin" / "harness", 0o755)
+        (seed / "README.md").write_text("v1\n")
+        self.git(seed, "init", "-b", "main")
+        self.git(seed, "config", "user.email", "test@example.com")
+        self.git(seed, "config", "user.name", "Harness Test")
+        self.git(seed, "add", ".")
+        self.git(seed, "commit", "-m", "initial")
+        self.git(seed, "clone", "--bare", str(seed), str(origin))
+        self.git(tmp, "clone", str(origin), str(source))
+        self.git(source, "checkout", "main")
+        self.git(seed, "remote", "add", "origin", str(origin))
+        (seed / "README.md").write_text("v2\n")
+        self.git(seed, "add", "README.md")
+        self.git(seed, "commit", "-m", "advance")
+        self.git(seed, "push", "origin", "main")
+        return source, source / "bin" / "harness"
 
     def guidance_placeholder(self) -> str:
         return (
@@ -171,6 +226,7 @@ class HarnessCliTest(unittest.TestCase):
             self.assertTrue((cwd / ".harness" / "project" / "index.md").exists())
             self.assertTrue((cwd / "AGENTS.md").exists())
             self.assertIn(".env", (cwd / ".gitignore").read_text().splitlines())
+            self.assertEqual(self.harness_module.HARNESS_VERSION, (cwd / ".harness" / "version").read_text().strip())
 
     def test_start_uses_local_session_id_and_sqlite_state(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1079,11 +1135,14 @@ class HarnessCliTest(unittest.TestCase):
             self.run_cli(cwd, "init")
             (cwd / "AGENTS.md").write_text("old\n")
             (cwd / ".harness" / "agents" / "implementation.md").write_text("old\n")
+            (cwd / ".harness" / "version").write_text("0\n")
 
             result = self.run_cli(cwd, "sync-guardrails", "--force")
 
             self.assertIn("synced harness guardrails", result.stdout)
             self.assertIn("- AGENTS.md", result.stdout)
+            self.assertIn("- .harness/version", result.stdout)
+            self.assertEqual(self.harness_module.HARNESS_VERSION, (cwd / ".harness" / "version").read_text().strip())
             self.assertIn("preflight-edit", (cwd / "AGENTS.md").read_text())
             self.assertIn("Implementation State Guardrails", (cwd / ".harness" / "agents" / "implementation.md").read_text())
             self.assertIn(".harness/project/index.md", (cwd / "AGENTS.md").read_text())
@@ -1111,6 +1170,78 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("Needs-Fix State Guardrails", needs_fix_text)
             self.assertIn("harness history <session-id>", needs_fix_text)
             self.assertIn("harness transition <session-id> implementation", needs_fix_text)
+
+    def test_start_warns_when_guardrails_are_outdated_but_still_creates_session(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            (cwd / ".harness" / "version").write_text("0\n")
+
+            result = self.run_cli(cwd, "start", "req-login-timeout")
+
+            self.assertIn("target guardrails are outdated; run harness update", result.stderr)
+            self.assertTrue((cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md").exists())
+
+    def test_start_does_not_warn_when_guardrails_are_current(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+
+            result = self.run_cli(cwd, "start", "req-login-timeout")
+
+            self.assertNotIn("target guardrails are outdated", result.stderr)
+
+    def test_update_skip_pull_syncs_outdated_target_guardrails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            (cwd / "AGENTS.md").write_text("old\n")
+            (cwd / ".harness" / "version").write_text("0\n")
+
+            result = self.run_cli(cwd, "update", "--skip-pull")
+
+            self.assertIn("synced harness guardrails", result.stdout)
+            self.assertIn("target guardrails synced", result.stdout)
+            self.assertIn("Harness Agent Bootstrap", (cwd / "AGENTS.md").read_text())
+            self.assertEqual(self.harness_module.HARNESS_VERSION, (cwd / ".harness" / "version").read_text().strip())
+
+    def test_update_skip_pull_does_nothing_when_target_guardrails_are_current(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+
+            result = self.run_cli(cwd, "update", "--skip-pull")
+
+            self.assertEqual("target guardrails current\n", result.stdout)
+
+    def test_update_pulls_harness_source_when_behind_origin_main(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            source, cli = self.make_harness_git_fixture(base)
+            target = base / "target"
+            target.mkdir()
+            self.run_temp_cli(cli, target, "init")
+
+            result = self.run_temp_cli(cli, target, "update")
+
+            self.assertIn("pulled latest harness source", result.stdout)
+            self.assertIn("target guardrails current", result.stdout)
+            self.assertEqual("v2\n", (source / "README.md").read_text())
+
+    def test_update_aborts_before_pull_when_harness_source_is_dirty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            source, cli = self.make_harness_git_fixture(base)
+            target = base / "target"
+            target.mkdir()
+            self.run_temp_cli(cli, target, "init")
+            (source / "local.txt").write_text("dirty\n")
+
+            result = self.run_temp_cli(cli, target, "update", check=False)
+
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("uncommitted changes", result.stderr)
+            self.assertEqual("v1\n", (source / "README.md").read_text())
 
     def test_existing_agents_sample_is_used_as_bootstrap_source(self):
         with tempfile.TemporaryDirectory() as tmp:

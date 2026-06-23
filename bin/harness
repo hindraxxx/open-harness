@@ -16,6 +16,7 @@ from pathlib import Path
 
 
 MAX_RECOVERY_ATTEMPTS = 3
+HARNESS_VERSION = "2026.06.23.2"
 STATES = ["start", "planning", "implementation", "review", "needs-fix", "quality-check", "approval", "blocked", "done"]
 TRANSITIONS = {
     "start": {"planning"},
@@ -77,6 +78,10 @@ def db_path() -> Path:
     return harness_dir() / "harness.db"
 
 
+def version_path() -> Path:
+    return harness_dir() / "version"
+
+
 def now() -> str:
     return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
 
@@ -99,6 +104,42 @@ def write_new(path: Path, content: str) -> bool:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
     return True
+
+
+def write_harness_version() -> None:
+    harness_dir().mkdir(exist_ok=True)
+    version_path().write_text(f"{HARNESS_VERSION}\n")
+
+
+def read_harness_version() -> str | None:
+    try:
+        return version_path().read_text().strip()
+    except FileNotFoundError:
+        return None
+
+
+def version_parts(version: str) -> tuple[int | str, ...]:
+    parts: list[int | str] = []
+    for part in re.split(r"[.-]", version):
+        if part.isdigit():
+            parts.append(int(part))
+        elif part:
+            parts.append(part)
+    return tuple(parts)
+
+
+def target_guardrails_outdated() -> bool:
+    if not harness_dir().exists():
+        return False
+    current = read_harness_version()
+    if not current:
+        return True
+    return version_parts(current) < version_parts(HARNESS_VERSION)
+
+
+def warn_if_guardrails_outdated() -> None:
+    if target_guardrails_outdated():
+        print("warning: target guardrails are outdated; run harness update", file=sys.stderr)
 
 
 def ensure_gitignore() -> None:
@@ -859,7 +900,57 @@ def overwrite_guardrails() -> list[Path]:
     path = agents_bootstrap_path()
     path.write_text(default_agents_bootstrap())
     written.append(path)
+    write_harness_version()
+    written.append(version_path())
     return written
+
+
+def harness_source_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def run_git(source: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=source,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if check and result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip()
+        die(f"git {' '.join(args)} failed in {source}: {detail}")
+    return result
+
+
+def ensure_harness_source_repo(source: Path) -> None:
+    inside = run_git(source, "rev-parse", "--is-inside-work-tree", check=False)
+    if inside.returncode != 0 or inside.stdout.strip() != "true":
+        die(f"harness source is not a git repo: {source}")
+    origin = run_git(source, "remote", "get-url", "origin", check=False)
+    if origin.returncode != 0 or not origin.stdout.strip():
+        die(f"harness source repo has no origin remote: {source}")
+
+
+def harness_source_dirty(source: Path) -> bool:
+    status = run_git(source, "status", "--short")
+    return bool(status.stdout.strip())
+
+
+def update_harness_source(source: Path) -> bool:
+    ensure_harness_source_repo(source)
+    run_git(source, "fetch", "origin")
+    local = run_git(source, "rev-parse", "HEAD").stdout.strip()
+    remote = run_git(source, "rev-parse", "origin/main").stdout.strip()
+    if local == remote:
+        print("harness source already current", flush=True)
+        return False
+    if harness_source_dirty(source):
+        die("harness source repo has uncommitted changes; commit, stash, or discard them before running harness update")
+    run_git(source, "pull", "--ff-only", "origin", "main")
+    print("pulled latest harness source", flush=True)
+    return True
 
 
 def non_harness_changes() -> list[str]:
@@ -2180,6 +2271,7 @@ def cmd_init(_args: argparse.Namespace) -> None:
     write_new(agents_bootstrap_path(), default_agents_bootstrap())
     for name, content in default_agents().items():
         write_new(agents_dir() / name, content)
+    write_new(version_path(), f"{HARNESS_VERSION}\n")
     write_project_map(overwrite=False)
     ensure_gitignore()
     print("initialized harness")
@@ -2221,11 +2313,27 @@ def cmd_upgrade_guardrails(_args: argparse.Namespace) -> None:
     print_synced_guardrails(overwrite_guardrails())
 
 
+def sync_target_guardrails_if_outdated() -> None:
+    if target_guardrails_outdated():
+        print_synced_guardrails(overwrite_guardrails())
+        print("target guardrails synced")
+    else:
+        print("target guardrails current")
+
+
+def cmd_update(args: argparse.Namespace) -> None:
+    if not args.skip_pull:
+        if update_harness_source(harness_source_root()):
+            os.execv(sys.executable, [sys.executable, str(Path(__file__).resolve()), "update", "--skip-pull"])
+    sync_target_guardrails_if_outdated()
+
+
 def cmd_start(args: argparse.Namespace) -> None:
     if not re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]*$", args.session_id):
         die("session id must use letters, numbers, dot, underscore, or dash")
     if artifact_path(args.session_id).exists():
         die(f"session already exists: {args.session_id}")
+    warn_if_guardrails_outdated()
     if not template_path().exists():
         cmd_init(argparse.Namespace())
     if not db_path().exists():
@@ -2786,6 +2894,10 @@ def build_parser() -> argparse.ArgumentParser:
     sync_guardrails_p = sub.add_parser("sync-guardrails")
     sync_guardrails_p.add_argument("--force", action="store_true")
     sync_guardrails_p.set_defaults(func=cmd_sync_guardrails)
+
+    update_p = sub.add_parser("update")
+    update_p.add_argument("--skip-pull", action="store_true")
+    update_p.set_defaults(func=cmd_update)
 
     start_p = sub.add_parser("start")
     start_p.add_argument("session_id")
