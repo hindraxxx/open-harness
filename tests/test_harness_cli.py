@@ -243,6 +243,17 @@ class HarnessCliTest(unittest.TestCase):
                             "    participant ReportService",
                             "    Client->>ReportService: render diagram",
                             "```",
+                            "",
+                            "~~~python",
+                            "print('tilde')",
+                            "~~~",
+                            "",
+                            "~~~mermaid",
+                            "sequenceDiagram",
+                            "    participant Client",
+                            "    participant TildeService",
+                            "    Client->>TildeService: render tilde diagram",
+                            "~~~",
                         ]
                     ),
                     1,
@@ -256,8 +267,10 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("Review &lt;script&gt;alert(&#x27;x&#x27;)&lt;/script&gt; safely.", html_text)
             self.assertNotIn("<script>alert", html_text)
             self.assertIn('<code class="language-python">print(&#x27;&lt;safe&gt;&#x27;)</code>', html_text)
+            self.assertIn('<code class="language-python">print(&#x27;tilde&#x27;)</code>', html_text)
             self.assertIn('<div class="mermaid">sequenceDiagram', html_text)
             self.assertIn("Client-&gt;&gt;ReportService: render diagram", html_text)
+            self.assertIn("Client-&gt;&gt;TildeService: render tilde diagram", html_text)
             self.assertIn("mermaid.initialize", html_text)
 
     def test_list_reports_no_sessions(self):

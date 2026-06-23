@@ -942,6 +942,7 @@ def render_markdown_body(body: str) -> str:
     table_lines = []
     code_lines = []
     code_language = ""
+    code_fence = ""
     in_code = False
 
     def flush_paragraph() -> None:
@@ -971,7 +972,8 @@ def render_markdown_body(body: str) -> str:
     for raw_line in body.splitlines():
         line = raw_line.rstrip()
         stripped = line.strip()
-        if stripped.startswith("```"):
+        fence = re.match(r"^(`{3,}|~{3,})(.*)$", stripped)
+        if fence and (not in_code or fence.group(1)[0] == code_fence):
             flush_paragraph()
             flush_list()
             flush_table()
@@ -979,10 +981,12 @@ def render_markdown_body(body: str) -> str:
                 parts.append(render_code_block(code_language, code_lines))
                 code_lines.clear()
                 code_language = ""
+                code_fence = ""
                 in_code = False
             else:
                 in_code = True
-                code_language = stripped[3:].strip()
+                code_fence = fence.group(1)[0]
+                code_language = fence.group(2).strip()
             continue
         if in_code:
             code_lines.append(line)
