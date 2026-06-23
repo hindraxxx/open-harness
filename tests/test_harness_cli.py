@@ -233,6 +233,9 @@ class HarnessCliTest(unittest.TestCase):
                             "",
                             "Review <script>alert('x')</script> safely.",
                             "",
+                            "1. In `web/src/UserController.java`, add `requestId`.",
+                            "2. In `UserConsentService.java`, pass `requestId` through.",
+                            "",
                             "```python",
                             "print('<safe>')",
                             "```",
@@ -266,6 +269,8 @@ class HarnessCliTest(unittest.TestCase):
             html_text = html_artifact.read_text()
             self.assertIn("Review &lt;script&gt;alert(&#x27;x&#x27;)&lt;/script&gt; safely.", html_text)
             self.assertNotIn("<script>alert", html_text)
+            self.assertIn("<ol><li>In <code>web/src/UserController.java</code>, add <code>requestId</code>.</li>", html_text)
+            self.assertIn("<li>In <code>UserConsentService.java</code>, pass <code>requestId</code> through.</li></ol>", html_text)
             self.assertIn('<code class="language-python">print(&#x27;&lt;safe&gt;&#x27;)</code>', html_text)
             self.assertIn('<code class="language-python">print(&#x27;tilde&#x27;)</code>', html_text)
             self.assertIn('<div class="mermaid">sequenceDiagram', html_text)

@@ -937,10 +937,15 @@ def dump_frontmatter(data: dict[str, str], body: str) -> str:
 
 def render_inline_markdown(value: str) -> str:
     escaped = html.escape(value)
+    with_code = re.sub(
+        r"`([^`]+)`",
+        lambda match: f"<code>{match.group(1)}</code>",
+        escaped,
+    )
     return re.sub(
         r"\[([^\]]+)\]\(([^)]+)\)",
         lambda match: f'<a href="{html.escape(match.group(2), quote=True)}">{match.group(1)}</a>',
-        escaped,
+        with_code,
     )
 
 
@@ -959,6 +964,7 @@ def render_markdown_body(body: str) -> str:
     parts = []
     paragraph = []
     list_items = []
+    list_tag = ""
     table_lines = []
     code_lines = []
     code_language = ""
@@ -971,9 +977,19 @@ def render_markdown_body(body: str) -> str:
             paragraph.clear()
 
     def flush_list() -> None:
+        nonlocal list_tag
         if list_items:
-            parts.append("<ul>" + "".join(list_items) + "</ul>")
+            tag = list_tag or "ul"
+            parts.append(f"<{tag}>" + "".join(list_items) + f"</{tag}>")
             list_items.clear()
+            list_tag = ""
+
+    def append_list_item(tag: str, item: str) -> None:
+        nonlocal list_tag
+        if list_items and list_tag != tag:
+            flush_list()
+        list_tag = tag
+        list_items.append(item)
 
     def flush_table() -> None:
         if table_lines:
@@ -1039,12 +1055,17 @@ def render_markdown_body(body: str) -> str:
         if item:
             flush_paragraph()
             marker = "[x]" if item.group(1).lower() == "x" else "[ ]"
-            list_items.append(f'<li><span class="check">{marker}</span> {render_inline_markdown(item.group(2))}</li>')
+            append_list_item("ul", f'<li><span class="check">{marker}</span> {render_inline_markdown(item.group(2))}</li>')
             continue
         item = re.match(r"^-\s+(.+)$", stripped)
         if item:
             flush_paragraph()
-            list_items.append(f"<li>{render_inline_markdown(item.group(1))}</li>")
+            append_list_item("ul", f"<li>{render_inline_markdown(item.group(1))}</li>")
+            continue
+        item = re.match(r"^\d+\.\s+(.+)$", stripped)
+        if item:
+            flush_paragraph()
+            append_list_item("ol", f"<li>{render_inline_markdown(item.group(1))}</li>")
             continue
         flush_list()
         paragraph.append(stripped)
