@@ -47,11 +47,73 @@ class HarnessCliTest(unittest.TestCase):
             self.fail(f"command failed: {args}\nstdout={result.stdout}\nstderr={result.stderr}")
         return result
 
+    def guidance_placeholder(self) -> str:
+        return (
+            "## Implementation Guidance\n\nTBD\n\n"
+            "### Overall Flow\n\n"
+            "```mermaid\n"
+            "sequenceDiagram\n"
+            "    participant Client\n"
+            "    participant FileA_Controller\n"
+            "    participant FileB_Service\n"
+            "    participant FileC_RepositoryOrGateway\n"
+            "    Client->>FileA_Controller: request\n"
+            "    FileA_Controller->>FileB_Service: command/query\n"
+            "    FileB_Service->>FileC_RepositoryOrGateway: persistence or external call\n"
+            "    FileC_RepositoryOrGateway-->>FileB_Service: result\n"
+            "    FileB_Service-->>FileA_Controller: response model\n"
+            "    FileA_Controller-->>Client: response\n"
+            "```\n\n"
+            "### Focused Changes Flow\n\n"
+            "```mermaid\n"
+            "sequenceDiagram\n"
+            "    participant Client\n"
+            "    participant FileA_TargetChange\n"
+            "    participant FileB_DependentService\n"
+            "    Client->>FileA_TargetChange: changed requirement input\n"
+            "    FileA_TargetChange->>FileB_DependentService: changed data/command\n"
+            "    FileB_DependentService-->>FileA_TargetChange: changed result\n"
+            "    FileA_TargetChange-->>Client: changed observable behavior\n"
+            "```\n\n"
+            "### Implementation Sketch\n\nTBD\n\n"
+            "### Decision Table\n\nTBD\n\n"
+            "### Code Anchors\n\nTBD"
+        )
+
     def with_guidance(self, text: str) -> str:
         guidance = "\n".join(
             [
                 "Expected location: inspect the module named by the requirement before editing.",
                 "Invariants: do not change unrelated routes, validation, persistence, or views unless verification proves they depend on the change.",
+                "",
+                "### Overall Flow",
+                "",
+                "```mermaid",
+                "sequenceDiagram",
+                "    participant Client",
+                "    participant ReportController_php",
+                "    participant ReportService",
+                "    participant ReportRepository",
+                "    Client->>ReportController_php: request",
+                "    ReportController_php->>ReportService: command/query",
+                "    ReportService->>ReportRepository: persistence or external call",
+                "    ReportRepository-->>ReportService: result",
+                "    ReportService-->>ReportController_php: response model",
+                "    ReportController_php-->>Client: response",
+                "```",
+                "",
+                "### Focused Changes Flow",
+                "",
+                "```mermaid",
+                "sequenceDiagram",
+                "    participant Client",
+                "    participant ReportController_php",
+                "    participant ReportService",
+                "    Client->>ReportController_php: scoped requirement input",
+                "    ReportController_php->>ReportService: scoped changed data",
+                "    ReportService-->>ReportController_php: scoped result",
+                "    ReportController_php-->>Client: changed observable behavior",
+                "```",
                 "",
                 "### Implementation Sketch",
                 "",
@@ -68,11 +130,7 @@ class HarnessCliTest(unittest.TestCase):
                 "- Use the existing module and branch conditions verified during planning.",
             ]
         )
-        return text.replace(
-            "## Implementation Guidance\n\nTBD\n\n### Implementation Sketch\n\nTBD\n\n### Decision Table\n\nTBD\n\n### Code Anchors\n\nTBD",
-            f"## Implementation Guidance\n\n{guidance}",
-            1,
-        )
+        return text.replace(self.guidance_placeholder(), f"## Implementation Guidance\n\n{guidance}", 1)
 
     def enter_quality_check(self, cwd: Path, validation_item: str = "Run validation") -> Path:
         self.run_cli(cwd, "init")
@@ -314,7 +372,35 @@ class HarnessCliTest(unittest.TestCase):
             text = text.replace("TBD", "Download Neraca as Excel", 1)
             text = text.replace("- [ ] TBD", "- [ ] Acceptance exists", 1)
             text = text.replace("- [ ] TBD", "- [ ] Run validation", 1)
-            text = text.replace("## Implementation Guidance\n\nTBD\n\n### Implementation Sketch\n\nTBD\n\n### Decision Table\n\nTBD\n\n### Code Anchors\n\nTBD", "## Implementation Guidance\n\nUse the existing controller and service style.", 1)
+            text = text.replace(
+                self.guidance_placeholder(),
+                "\n".join(
+                    [
+                        "## Implementation Guidance",
+                        "",
+                        "Use the existing controller and service style.",
+                        "",
+                        "### Overall Flow",
+                        "",
+                        "```mermaid",
+                        "sequenceDiagram",
+                        "    participant Client",
+                        "    participant ReportController_php",
+                        "    Client->>ReportController_php: request",
+                        "```",
+                        "",
+                        "### Focused Changes Flow",
+                        "",
+                        "```mermaid",
+                        "sequenceDiagram",
+                        "    participant Client",
+                        "    participant ReportController_php",
+                        "    Client->>ReportController_php: changed request",
+                        "```",
+                    ]
+                ),
+                1,
+            )
             text = text.replace("- [ ] TBD", "- [ ] Implement download flow", 1)
             artifact.write_text(text)
 
@@ -323,6 +409,63 @@ class HarnessCliTest(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("Implementation Guidance must include an Implementation Sketch", result.stdout)
+
+    def test_approve_planning_requires_mermaid_sequence_flows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            self.run_cli(cwd, "start", "req-login-timeout")
+            artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
+            text = artifact.read_text()
+            text = text.replace("TBD", "Download Neraca as Excel", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Acceptance exists", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Run validation", 1)
+            text = text.replace(
+                self.guidance_placeholder(),
+                "\n".join(
+                    [
+                        "## Implementation Guidance",
+                        "",
+                        "Expected location: controller.",
+                        "",
+                        "### Overall Flow",
+                        "",
+                        "Client -> Controller -> Domain",
+                        "",
+                        "### Focused Changes Flow",
+                        "",
+                        "```mermaid",
+                        "sequenceDiagram",
+                        "    participant Client",
+                        "    participant ReportController_php",
+                        "    Client->>ReportController_php: changed request",
+                        "```",
+                        "",
+                        "### Implementation Sketch",
+                        "",
+                        "Pseudocode: change the selected branch only.",
+                        "",
+                        "### Decision Table",
+                        "",
+                        "| Branch | Expected behavior |",
+                        "| --- | --- |",
+                        "| Existing flow | Preserve |",
+                        "",
+                        "### Code Anchors",
+                        "",
+                        "- Existing controller condition.",
+                    ]
+                ),
+                1,
+            )
+            text = text.replace("- [ ] TBD", "- [ ] Implement download flow", 1)
+            artifact.write_text(text)
+
+            self.run_cli(cwd, "transition", "req-login-timeout", "planning")
+            result = self.run_cli(cwd, "approve-planning", "req-login-timeout", "--by", "Liem", check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Implementation Guidance must include an Overall Flow Mermaid sequence diagram", result.stdout)
 
     def test_approve_planning_requires_decision_table_and_code_anchors(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -335,8 +478,36 @@ class HarnessCliTest(unittest.TestCase):
             text = text.replace("- [ ] TBD", "- [ ] Acceptance exists", 1)
             text = text.replace("- [ ] TBD", "- [ ] Run validation", 1)
             text = text.replace(
-                "## Implementation Guidance\n\nTBD\n\n### Implementation Sketch\n\nTBD\n\n### Decision Table\n\nTBD\n\n### Code Anchors\n\nTBD",
-                "## Implementation Guidance\n\nExpected location: controller.\n\n### Implementation Sketch\n\nPseudocode: change the selected branch only.",
+                self.guidance_placeholder(),
+                "\n".join(
+                    [
+                        "## Implementation Guidance",
+                        "",
+                        "Expected location: controller.",
+                        "",
+                        "### Overall Flow",
+                        "",
+                        "```mermaid",
+                        "sequenceDiagram",
+                        "    participant Client",
+                        "    participant ReportController_php",
+                        "    Client->>ReportController_php: request",
+                        "```",
+                        "",
+                        "### Focused Changes Flow",
+                        "",
+                        "```mermaid",
+                        "sequenceDiagram",
+                        "    participant Client",
+                        "    participant ReportController_php",
+                        "    Client->>ReportController_php: changed request",
+                        "```",
+                        "",
+                        "### Implementation Sketch",
+                        "",
+                        "Pseudocode: change the selected branch only.",
+                    ]
+                ),
                 1,
             )
             text = text.replace("- [ ] TBD", "- [ ] Implement download flow", 1)
@@ -760,10 +931,14 @@ class HarnessCliTest(unittest.TestCase):
             planning_text = (cwd / ".harness" / "agents" / "planning.md").read_text()
             self.assertIn("Read `.harness/project/index.md`", planning_text)
             self.assertIn("lower-capability implementation agent", planning_text)
+            self.assertIn("Overall Flow", planning_text)
+            self.assertIn("Focused Changes Flow", planning_text)
             self.assertIn("Implementation Sketch", planning_text)
             self.assertIn("Decision Table", planning_text)
             self.assertIn("Code Anchors", planning_text)
             implementation_text = (cwd / ".harness" / "agents" / "implementation.md").read_text()
+            self.assertIn("Read `### Overall Flow`", implementation_text)
+            self.assertIn("Read `### Focused Changes Flow`", implementation_text)
             self.assertIn("Follow the `### Implementation Sketch`", implementation_text)
             self.assertIn("Use `### Decision Table`", implementation_text)
             self.assertIn("Use `### Code Anchors`", implementation_text)

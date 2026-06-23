@@ -95,7 +95,7 @@ bin/harness transition req-login-timeout implementation
 
 `approve-planning` marks `## Acceptance Criteria` items checked as requirement approval, then locks a hash of Requirement Summary, Acceptance Criteria, Validation Plan content, and Implementation Guidance. If those planning sections change after approval, implementation/edit gates block until planning is approved again. Validation Plan and Implementation Checklist remain execution checklists; checking validation or implementation items during execution does not invalidate planning approval.
 
-Planning must include concrete handoff details inside `## Implementation Guidance`: a `### Implementation Sketch` containing all pseudocode, sample function shapes, and code-shape steps; a `### Decision Table` mapping important branches or input states to expected behavior; and `### Code Anchors` naming exact existing variables, conditions, helpers, or call sites. This is intentionally required so lower-capability implementation agents can execute the approved approach directly instead of re-planning.
+Planning must include concrete handoff details inside `## Implementation Guidance`: a `### Overall Flow` Mermaid `sequenceDiagram` showing the end-to-end request/data flow across the client, MVC/DDD layers, infrastructure, persistence, and external calls, with participants labeled by exact discovered files/classes/modules where possible; a `### Focused Changes Flow` Mermaid `sequenceDiagram` showing the requirement-specific changed path from the target file/module to dependent files/modules and client-visible effects; a `### Implementation Sketch` containing all pseudocode, sample function shapes, and code-shape steps; a `### Decision Table` mapping important branches or input states to expected behavior; and `### Code Anchors` naming exact existing variables, conditions, helpers, or call sites. This is intentionally required so lower-capability implementation agents can execute the approved approach directly instead of re-planning.
 
 After implementation, move to review and stop for human review:
 
@@ -223,7 +223,7 @@ Tell an agent the session id. The agent should:
 3. Read `.harness/agents/common.md`.
 4. Read `.harness/project/index.md` when present.
 5. Read the state guardrail printed by status.
-6. In `implementation`, read `## Implementation Guidance` and follow `### Implementation Sketch`, `### Decision Table`, and `### Code Anchors` before editing.
+6. In `implementation`, read `## Implementation Guidance`, inspect `### Overall Flow` and `### Focused Changes Flow`, then follow `### Implementation Sketch`, `### Decision Table`, and `### Code Anchors` before editing.
 7. Run `bin/harness preflight-edit <session-id>` before product code edits.
 8. Work within that state only.
 
