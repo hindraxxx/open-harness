@@ -407,6 +407,19 @@ Before doing harness work:
 - Treat `.harness/project/` as orientation only. Verify relevant facts against current code before using them.
 - If a project-map section is stale or missing during planning, update that section before filling the session artifact.
 
+## Final Response Gate
+
+Before any final response during harness work:
+
+1. Run `harness status <session-id>`.
+2. If `Missing:` is not `none`, resolve every missing harness item that is allowed in the current state.
+3. Run `harness validate <session-id>` before any allowed transition.
+4. If validation passes and the current state can transition without human approval, run the required `harness transition <session-id> <next-state>`.
+5. Stop only when the workflow is blocked by explicit human approval, failed validation, a required environment/proof blocker, or a harness transition guard.
+6. In the final response, report the current harness state and the next required gate.
+
+Passing tests or completing code is not enough to stop. Harness state must be clean or explicitly blocked.
+
 ## Gate Order
 
 1. `planning` -> `implementation`: requires filled requirement summary, acceptance criteria checklist, validation plan checklist, implementation checklist, and explicit human planning approval.
@@ -550,9 +563,11 @@ Allowed:
 Required:
 
 - After completing each implementation task, check its item in `## Implementation Checklist`.
-- Before reporting implementation complete, run `harness status <session-id>`.
-- Do not summarize implementation as complete while any implementation checklist item remains unchecked.
-- Transition to `review` only after every implementation checklist item is checked.
+- Implementation is not complete when code edits are done or tests pass.
+- Implementation is complete only after every implementation checklist item is checked, `harness validate <session-id>` passes, and `harness transition <session-id> review` succeeds or reports an explicit blocker.
+- Before reporting implementation complete, run `harness status <session-id>` and resolve any `Missing:` items allowed in `implementation`.
+- Do not summarize implementation as complete while any implementation checklist item remains unchecked or while `harness status` reports missing implementation items.
+- After every implementation checklist item is checked, run `harness validate <session-id>` and transition to `review` if validation passes.
 - Do not run validation plan commands, browser validation, screenshots, or proof attachment in `implementation`.
 - If build or unit tests fail during implementation, run `harness recover <session-id> --reason "unit test failed: <summary>"` and fix from `needs-fix`.
 
@@ -566,6 +581,10 @@ Forbidden:
         "review.md": """# Review State Guardrails
 
 Run AI review, record findings, and wait for human review.
+
+Entering `review` is not a stopping point. After a successful `implementation -> review`
+transition, immediately perform the AI review and record it before responding, unless a
+harness command fails.
 
 After running AI review, immediately record it in the artifact before responding:
 
@@ -588,6 +607,13 @@ harness record-review <session-id> --file review.md --required-fix "Fix validati
 ```
 
 A chat-only review is incomplete.
+
+Review is complete only after:
+
+- `## Review > AI Review` is filled by `harness record-review`.
+- Any human-selected required fixes are either absent or routed through `needs-fix`.
+- `harness status <session-id>` reports no review items missing except explicit human approval.
+- The user explicitly approves review before `harness approve-review` is run.
 
 Forbidden:
 

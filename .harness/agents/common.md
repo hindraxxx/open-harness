@@ -25,6 +25,19 @@ Before doing harness work:
 - Treat `.harness/project/` as orientation only. Verify relevant facts against current code before using them.
 - If a project-map section is stale or missing during planning, update that section before filling the session artifact.
 
+## Final Response Gate
+
+Before any final response during harness work:
+
+1. Run `harness status <session-id>`.
+2. If `Missing:` is not `none`, resolve every missing harness item that is allowed in the current state.
+3. Run `harness validate <session-id>` before any allowed transition.
+4. If validation passes and the current state can transition without human approval, run the required `harness transition <session-id> <next-state>`.
+5. Stop only when the workflow is blocked by explicit human approval, failed validation, a required environment/proof blocker, or a harness transition guard.
+6. In the final response, report the current harness state and the next required gate.
+
+Passing tests or completing code is not enough to stop. Harness state must be clean or explicitly blocked.
+
 ## Gate Order
 
 1. `planning` -> `implementation`: requires filled requirement summary, acceptance criteria checklist, validation plan checklist, implementation checklist, and explicit human planning approval.

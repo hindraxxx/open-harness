@@ -26,9 +26,11 @@ Allowed:
 Required:
 
 - After completing each implementation task, check its item in `## Implementation Checklist`.
-- Before reporting implementation complete, run `harness status <session-id>`.
-- Do not summarize implementation as complete while any implementation checklist item remains unchecked.
-- Transition to `review` only after every implementation checklist item is checked.
+- Implementation is not complete when code edits are done or tests pass.
+- Implementation is complete only after every implementation checklist item is checked, `harness validate <session-id>` passes, and `harness transition <session-id> review` succeeds or reports an explicit blocker.
+- Before reporting implementation complete, run `harness status <session-id>` and resolve any `Missing:` items allowed in `implementation`.
+- Do not summarize implementation as complete while any implementation checklist item remains unchecked or while `harness status` reports missing implementation items.
+- After every implementation checklist item is checked, run `harness validate <session-id>` and transition to `review` if validation passes.
 - Do not run validation plan commands, browser validation, screenshots, or proof attachment in `implementation`.
 - If build or unit tests fail during implementation, run `harness recover <session-id> --reason "unit test failed: <summary>"` and fix from `needs-fix`.
 

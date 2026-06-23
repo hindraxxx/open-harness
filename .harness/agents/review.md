@@ -2,6 +2,10 @@
 
 Run AI review, record findings, and wait for human review.
 
+Entering `review` is not a stopping point. After a successful `implementation -> review`
+transition, immediately perform the AI review and record it before responding, unless a
+harness command fails.
+
 After running AI review, immediately record it in the artifact before responding:
 
 ```bash
@@ -23,6 +27,13 @@ harness record-review <session-id> --file review.md --required-fix "Fix validati
 ```
 
 A chat-only review is incomplete.
+
+Review is complete only after:
+
+- `## Review > AI Review` is filled by `harness record-review`.
+- Any human-selected required fixes are either absent or routed through `needs-fix`.
+- `harness status <session-id>` reports no review items missing except explicit human approval.
+- The user explicitly approves review before `harness approve-review` is run.
 
 Forbidden:
 
