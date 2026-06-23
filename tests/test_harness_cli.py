@@ -1094,6 +1094,7 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("Read `.harness/project/index.md`", planning_text)
             self.assertIn("lower-capability implementation agent", planning_text)
             self.assertIn("Overall Flow", planning_text)
+            self.assertIn("When revising `## Implementation Guidance`, re-check `### Overall Flow`", planning_text)
             self.assertNotIn("Focused Changes Flow", planning_text)
             self.assertIn("Implementation Sketch", planning_text)
             self.assertIn("Decision Table", planning_text)

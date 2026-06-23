@@ -56,4 +56,6 @@ Planning must include real checklist items in:
 
 Do not put pseudocode or sample code in a separate top-level section. Keep it inside `### Implementation Sketch` so implementers find the intended code shape in one place.
 
+When revising `## Implementation Guidance`, re-check `### Overall Flow` and update it if target files, dependencies, request/data path, side effects, or client-visible behavior changed.
+
 Do not transition to implementation with placeholder `TBD` checklist items.
