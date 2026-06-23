@@ -271,6 +271,9 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn('<div class="mermaid">sequenceDiagram', html_text)
             self.assertIn("Client-&gt;&gt;ReportService: render diagram", html_text)
             self.assertIn("Client-&gt;&gt;TildeService: render tilde diagram", html_text)
+            self.assertIn('<button type="button" class="diagram-open">Open diagram</button>', html_text)
+            self.assertIn('<dialog class="diagram-modal" id="diagram-modal">', html_text)
+            self.assertIn('modalBody.replaceChildren(diagram.cloneNode(true));', html_text)
             self.assertIn("mermaid.initialize", html_text)
 
     def test_list_reports_no_sessions(self):
@@ -549,6 +552,67 @@ class HarnessCliTest(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("Implementation Guidance must include an Overall Flow Mermaid sequence diagram", result.stdout)
+
+    def test_approve_planning_accepts_tilde_mermaid_sequence_flows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            self.run_cli(cwd, "start", "req-login-timeout")
+            artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
+            text = artifact.read_text()
+            text = text.replace("TBD", "Download Neraca as Excel", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Acceptance exists", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Run validation", 1)
+            text = text.replace(
+                self.guidance_placeholder(),
+                "\n".join(
+                    [
+                        "## Implementation Guidance",
+                        "",
+                        "Expected location: controller.",
+                        "",
+                        "### Overall Flow",
+                        "",
+                        "~~~mermaid",
+                        "sequenceDiagram",
+                        "    participant Client",
+                        "    participant ReportController_php",
+                        "    Client->>ReportController_php: request",
+                        "~~~",
+                        "",
+                        "### Focused Changes Flow",
+                        "",
+                        "~~~mermaid",
+                        "sequenceDiagram",
+                        "    participant Client",
+                        "    participant ReportController_php",
+                        "    Client->>ReportController_php: changed request",
+                        "~~~",
+                        "",
+                        "### Implementation Sketch",
+                        "",
+                        "Pseudocode: change the selected branch only.",
+                        "",
+                        "### Decision Table",
+                        "",
+                        "| Branch | Expected behavior |",
+                        "| --- | --- |",
+                        "| Existing flow | Preserve |",
+                        "",
+                        "### Code Anchors",
+                        "",
+                        "- Existing controller condition.",
+                    ]
+                ),
+                1,
+            )
+            text = text.replace("- [ ] TBD", "- [ ] Implement download flow", 1)
+            artifact.write_text(text)
+
+            self.run_cli(cwd, "transition", "req-login-timeout", "planning")
+            result = self.run_cli(cwd, "approve-planning", "req-login-timeout", "--by", "Liem")
+
+            self.assertIn("planning approved by Liem", result.stdout)
 
     def test_approve_planning_requires_decision_table_and_code_anchors(self):
         with tempfile.TemporaryDirectory() as tmp:

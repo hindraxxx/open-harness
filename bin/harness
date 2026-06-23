@@ -984,7 +984,12 @@ def render_markdown_body(body: str) -> str:
         content = html.escape("\n".join(lines))
         normalized_language = re.sub(r"[^a-zA-Z0-9_-]", "", language.strip().lower())
         if normalized_language == "mermaid":
-            return f'<div class="mermaid">{content}</div>'
+            return (
+                '<div class="diagram-block">'
+                '<button type="button" class="diagram-open">Open diagram</button>'
+                f'<div class="mermaid">{content}</div>'
+                '</div>'
+            )
         if normalized_language:
             return f'<pre><code class="language-{html.escape(normalized_language, quote=True)}">{content}</code></pre>'
         return f"<pre><code>{content}</code></pre>"
@@ -1155,13 +1160,95 @@ code {{
   background: var(--paper);
   border: 1px solid var(--line);
   border-radius: 7px;
-  margin: 1rem 0;
+  margin: 0;
   padding: 16px;
 }}
 .mermaid svg {{
   display: block;
   margin: 0 auto;
   max-width: 100%;
+}}
+.diagram-block {{
+  margin: 1rem 0;
+}}
+.diagram-open {{
+  appearance: none;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  color: #ffffff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 700;
+  margin: 0 0 8px;
+  padding: 6px 10px;
+}}
+.diagram-open:hover {{ background: #105a60; }}
+.diagram-modal {{
+  align-items: stretch;
+  background: rgba(15, 23, 42, 0.72);
+  border: 0;
+  height: 100vh;
+  inset: 0;
+  max-height: none;
+  max-width: none;
+  padding: 22px;
+  width: 100vw;
+}}
+.diagram-modal[open] {{ display: flex; }}
+.diagram-modal::backdrop {{ background: rgba(15, 23, 42, 0.72); }}
+.diagram-modal-panel {{
+  background: var(--paper);
+  border-radius: 8px;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}}
+.diagram-modal-toolbar {{
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  padding: 10px 12px;
+}}
+.diagram-modal-title {{
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 700;
+}}
+.diagram-close {{
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 700;
+  padding: 5px 9px;
+}}
+.diagram-modal-body {{
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 18px;
+}}
+.diagram-modal-body svg {{
+  display: block;
+  height: auto;
+  margin: 0 auto;
+  max-width: none;
+  min-width: min(1400px, 100%);
+}}
+.diagram-modal-body .mermaid {{
+  border: 0;
+  padding: 0;
 }}
 table {{
   width: 100%;
@@ -1259,9 +1346,33 @@ th {{
 </aside>
 </div>
 </main>
+<dialog class="diagram-modal" id="diagram-modal">
+  <div class="diagram-modal-panel">
+    <div class="diagram-modal-toolbar">
+      <span class="diagram-modal-title">Diagram preview</span>
+      <button type="button" class="diagram-close">Close</button>
+    </div>
+    <div class="diagram-modal-body"></div>
+  </div>
+</dialog>
 <script type="module">
 import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
 mermaid.initialize({{ startOnLoad: true, securityLevel: "strict", theme: "default" }});
+const modal = document.getElementById("diagram-modal");
+const modalBody = modal?.querySelector(".diagram-modal-body");
+const closeButton = modal?.querySelector(".diagram-close");
+document.querySelectorAll(".diagram-open").forEach((button) => {{
+  button.addEventListener("click", () => {{
+    const diagram = button.parentElement?.querySelector(".mermaid");
+    if (!modal || !modalBody || !diagram) return;
+    modalBody.replaceChildren(diagram.cloneNode(true));
+    modal.showModal();
+  }});
+}});
+closeButton?.addEventListener("click", () => modal?.close());
+modal?.addEventListener("click", (event) => {{
+  if (event.target === modal) modal.close();
+}});
 </script>
 </body>
 </html>
@@ -1580,7 +1691,7 @@ def has_implementation_sketch(value: str) -> bool:
     if has_real_content(sketch):
         return True
     without_mermaid = re.sub(
-        r"```mermaid\s+.*?```",
+        r"(```|~~~)mermaid\s+.*?\1",
         "",
         value,
         flags=re.IGNORECASE | re.DOTALL,
@@ -1612,7 +1723,7 @@ def has_mermaid_sequence_subsection(value: str, heading: str) -> bool:
         return False
     return bool(
         re.search(
-            r"```mermaid\s+.*?\bsequenceDiagram\b.*?```",
+            r"(```|~~~)mermaid\s+.*?\bsequenceDiagram\b.*?\1",
             content,
             re.IGNORECASE | re.DOTALL,
         )
@@ -1621,7 +1732,7 @@ def has_mermaid_sequence_subsection(value: str, heading: str) -> bool:
 
 def has_real_implementation_guidance(value: str) -> bool:
     without_mermaid = re.sub(
-        r"```mermaid\s+.*?```",
+        r"(```|~~~)mermaid\s+.*?\1",
         "",
         value,
         flags=re.IGNORECASE | re.DOTALL,
