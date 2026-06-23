@@ -217,16 +217,18 @@ This overwrites `.harness/project/*.md` templates only. It does not touch sessio
 
 ## Agent Flow
 
-Tell an agent the session id. The agent should:
+Tell an agent the session id, or let the agent create one if no session exists. The agent should:
 
 1. Read the repository bootstrap instructions. Normal child repositories use `AGENTS.md`; this workflow-project repository keeps the source sample in `AGENTS_SAMPLE.md`.
-2. Run `bin/harness status <session-id>`.
-3. Read `.harness/agents/common.md`.
-4. Read `.harness/project/index.md` when present.
-5. Read the state guardrail printed by status.
-6. In `implementation`, read `## Implementation Guidance`, inspect `### Overall Flow` and `### Focused Changes Flow`, then follow `### Implementation Sketch`, `### Decision Table`, and `### Code Anchors` before editing.
-7. Run `bin/harness preflight-edit <session-id>` before product code edits.
-8. Work within that state only.
+2. Identify the session id from the user request, current artifact, or `bin/harness list`.
+3. If no session exists, choose a short kebab-case session id that summarizes the request and run `bin/harness start <session-id>`.
+4. Run `bin/harness status <session-id>`.
+5. Read `.harness/agents/common.md`.
+6. Read `.harness/project/index.md` when present.
+7. Read the state guardrail printed by status.
+8. In `implementation`, read `## Implementation Guidance`, inspect `### Overall Flow` and `### Focused Changes Flow`, then follow `### Implementation Sketch`, `### Decision Table`, and `### Code Anchors` before editing.
+9. Run `bin/harness preflight-edit <session-id>` before product code edits.
+10. Work within that state only.
 
 ## Test
 

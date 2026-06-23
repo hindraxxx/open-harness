@@ -2,12 +2,13 @@
 
 Before doing harness work:
 
-1. Identify the session id.
-2. Run `harness status <session-id>`.
-3. Read this file.
-4. Read `.harness/project/index.md` for project orientation when present.
-5. Read the state guardrail printed by status.
-6. Before editing product code, run `harness preflight-edit <session-id>`.
+1. Identify the session id from the user request, current artifact, or `harness list`.
+2. If no session exists, choose a short kebab-case session id that summarizes the request and run `harness start <session-id>`.
+3. Run `harness status <session-id>`.
+4. Read this file.
+5. Read `.harness/project/index.md` for project orientation when present.
+6. Read the state guardrail printed by status.
+7. Before editing product code, run `harness preflight-edit <session-id>`.
 
 ## Hard Rules
 
