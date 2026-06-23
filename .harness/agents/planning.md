@@ -47,6 +47,7 @@ Planning must include real checklist items in:
 
 - expected file/function/module locations discovered during exploration
 - current behavior to change or preserve
+- a mandatory `### Overall Flow` subsection containing a Mermaid `sequenceDiagram` that shows the end-to-end request/data flow across relevant layers such as client, controller, application/domain service, repository/infrastructure, database, and external calls; label participants with exact discovered files, classes, modules, or call sites where possible, for example `ReportController.php`, `ReportService`, `ReportRepository`, or `PaymentGatewayClient`
 - a mandatory `### Implementation Sketch` subsection containing all pseudocode, sample function shapes, and concrete code-shape steps the implementation agent can follow directly
 - a mandatory `### Decision Table` subsection mapping each important branch/input state to the expected behavior, metric, return value, or side effect
 - a mandatory `### Code Anchors` subsection naming the exact existing variables, conditions, helper functions, or call sites the implementation must use for key decisions

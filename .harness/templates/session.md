@@ -34,6 +34,22 @@ TBD
 
 TBD
 
+### Overall Flow
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant FileA_Controller
+    participant FileB_Service
+    participant FileC_RepositoryOrGateway
+    Client->>FileA_Controller: request
+    FileA_Controller->>FileB_Service: command/query
+    FileB_Service->>FileC_RepositoryOrGateway: persistence or external call
+    FileC_RepositoryOrGateway-->>FileB_Service: result
+    FileB_Service-->>FileA_Controller: response model
+    FileA_Controller-->>Client: response
+```
+
 ### Implementation Sketch
 
 TBD

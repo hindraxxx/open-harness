@@ -210,19 +210,6 @@ sequenceDiagram
     FileA_Controller-->>Client: response
 ```
 
-### Focused Changes Flow
-
-```mermaid
-sequenceDiagram
-    participant Client
-    participant FileA_TargetChange
-    participant FileB_DependentService
-    Client->>FileA_TargetChange: changed requirement input
-    FileA_TargetChange->>FileB_DependentService: changed data/command
-    FileB_DependentService-->>FileA_TargetChange: changed result
-    FileA_TargetChange-->>Client: changed observable behavior
-```
-
 ### Implementation Sketch
 
 TBD
@@ -524,7 +511,6 @@ Planning must include real checklist items in:
 - expected file/function/module locations discovered during exploration
 - current behavior to change or preserve
 - a mandatory `### Overall Flow` subsection containing a Mermaid `sequenceDiagram` that shows the end-to-end request/data flow across relevant layers such as client, controller, application/domain service, repository/infrastructure, database, and external calls; label participants with exact discovered files, classes, modules, or call sites where possible, for example `ReportController.php`, `ReportService`, `ReportRepository`, or `PaymentGatewayClient`
-- a mandatory `### Focused Changes Flow` subsection containing a Mermaid `sequenceDiagram` that isolates the requirement-specific changed path, including the exact target files/modules being changed, dependent files/modules they call, and client-visible or external-call effects
 - a mandatory `### Implementation Sketch` subsection containing all pseudocode, sample function shapes, and concrete code-shape steps the implementation agent can follow directly
 - a mandatory `### Decision Table` subsection mapping each important branch/input state to the expected behavior, metric, return value, or side effect
 - a mandatory `### Code Anchors` subsection naming the exact existing variables, conditions, helper functions, or call sites the implementation must use for key decisions
@@ -543,11 +529,10 @@ Before implementation:
 
 1. Read `## Implementation Guidance`.
 2. Read `### Overall Flow` to understand the end-to-end request/data path across client, MVC/DDD layers, infrastructure, and external calls.
-3. Read `### Focused Changes Flow` to understand the requirement-specific changed path and client-visible effects.
-4. Follow the `### Implementation Sketch` as the starting code plan.
-5. Use `### Decision Table` as the source of truth for branch behavior.
-6. Use `### Code Anchors` for the exact existing variables, conditions, helpers, and call sites to modify or preserve.
-7. If the diagrams, sketch, decision table, or code anchors are missing, ambiguous, or conflict with current code, stop and return to planning instead of re-planning silently.
+3. Follow the `### Implementation Sketch` as the starting code plan.
+4. Use `### Decision Table` as the source of truth for branch behavior.
+5. Use `### Code Anchors` for the exact existing variables, conditions, helpers, and call sites to modify or preserve.
+6. If the diagram, sketch, decision table, or code anchors are missing, ambiguous, or conflict with current code, stop and return to planning instead of re-planning silently.
 
 Before editing product code, run:
 
@@ -682,7 +667,7 @@ On entry:
    - failed unit tests / build: `## Implementation Checklist` and `## Implementation Guidance`.
    - review fixes: `## Review > Required Fixes`.
    - quality failures: `## Validation Plan` and `## Quality Check > Commands Run`.
-3. Re-read `### Overall Flow`, `### Focused Changes Flow`, `### Implementation Sketch`, `### Decision Table`, and `### Code Anchors`
+3. Re-read `### Overall Flow`, `### Implementation Sketch`, `### Decision Table`, and `### Code Anchors`
    before changing branch behavior.
 
 Before editing product code, run:
@@ -1126,7 +1111,7 @@ main {{
 }}
 .artifact-shell {{
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 260px;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
   gap: 22px;
   align-items: start;
 }}
@@ -1352,7 +1337,9 @@ th {{
   padding: 5px 10px;
 }}
 .meta {{ margin: 0; font-size: 0.85rem; }}
-.meta th, .meta td {{ padding: 7px 8px; word-break: break-word; }}
+.meta th, .meta td {{ padding: 7px 8px; }}
+.meta th {{ overflow-wrap: normal; word-break: normal; }}
+.meta td {{ overflow-wrap: anywhere; word-break: normal; }}
 .check {{
   color: var(--accent);
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
@@ -1363,6 +1350,12 @@ th {{
   .artifact-shell {{ grid-template-columns: 1fr; }}
   .meta-card {{ position: static; order: -1; }}
   .content {{ padding: 20px; }}
+  .meta, .meta tbody, .meta tr, .meta th, .meta td {{ display: block; width: 100%; }}
+  .meta tr {{ border-bottom: 1px solid var(--line); }}
+  .meta tr:last-child {{ border-bottom: 0; }}
+  .meta th, .meta td {{ border-bottom: 0; }}
+  .meta th {{ padding-bottom: 2px; }}
+  .meta td {{ padding-top: 2px; }}
 }}
 </style>
 </head>
@@ -2069,8 +2062,6 @@ def validate_requirements(
             missing.append("Implementation Guidance must be filled")
         elif not has_mermaid_sequence_subsection(implementation_guidance, "Overall Flow"):
             missing.append("Implementation Guidance must include an Overall Flow Mermaid sequence diagram")
-        elif not has_mermaid_sequence_subsection(implementation_guidance, "Focused Changes Flow"):
-            missing.append("Implementation Guidance must include a Focused Changes Flow Mermaid sequence diagram")
         elif not has_implementation_sketch(implementation_guidance):
             missing.append("Implementation Guidance must include an Implementation Sketch with pseudocode or concrete code-shape steps")
         elif not has_guidance_subsection(implementation_guidance, "Decision Table"):

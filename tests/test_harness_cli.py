@@ -64,17 +64,6 @@ class HarnessCliTest(unittest.TestCase):
             "    FileB_Service-->>FileA_Controller: response model\n"
             "    FileA_Controller-->>Client: response\n"
             "```\n\n"
-            "### Focused Changes Flow\n\n"
-            "```mermaid\n"
-            "sequenceDiagram\n"
-            "    participant Client\n"
-            "    participant FileA_TargetChange\n"
-            "    participant FileB_DependentService\n"
-            "    Client->>FileA_TargetChange: changed requirement input\n"
-            "    FileA_TargetChange->>FileB_DependentService: changed data/command\n"
-            "    FileB_DependentService-->>FileA_TargetChange: changed result\n"
-            "    FileA_TargetChange-->>Client: changed observable behavior\n"
-            "```\n\n"
             "### Implementation Sketch\n\nTBD\n\n"
             "### Decision Table\n\nTBD\n\n"
             "### Code Anchors\n\nTBD"
@@ -100,19 +89,6 @@ class HarnessCliTest(unittest.TestCase):
                 "    ReportRepository-->>ReportService: result",
                 "    ReportService-->>ReportController_php: response model",
                 "    ReportController_php-->>Client: response",
-                "```",
-                "",
-                "### Focused Changes Flow",
-                "",
-                "```mermaid",
-                "sequenceDiagram",
-                "    participant Client",
-                "    participant ReportController_php",
-                "    participant ReportService",
-                "    Client->>ReportController_php: scoped requirement input",
-                "    ReportController_php->>ReportService: scoped changed data",
-                "    ReportService-->>ReportController_php: scoped result",
-                "    ReportController_php-->>Client: changed observable behavior",
                 "```",
                 "",
                 "### Implementation Sketch",
@@ -272,8 +248,9 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("<ol><li>In <code>web/src/UserController.java</code>, add <code>requestId</code>.</li>", html_text)
             self.assertIn("<li>In <code>UserConsentService.java</code>, pass <code>requestId</code> through.</li></ol>", html_text)
             self.assertIn("width: min(1380px, calc(100% - 40px));", html_text)
-            self.assertIn("grid-template-columns: minmax(0, 1fr) 260px;", html_text)
+            self.assertIn("grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);", html_text)
             self.assertIn("overflow-wrap: anywhere;", html_text)
+            self.assertIn(".meta, .meta tbody, .meta tr, .meta th, .meta td { display: block; width: 100%; }", html_text)
             self.assertIn('<code class="language-python">print(&#x27;&lt;safe&gt;&#x27;)</code>', html_text)
             self.assertIn('<code class="language-python">print(&#x27;tilde&#x27;)</code>', html_text)
             self.assertIn('<div class="mermaid">sequenceDiagram', html_text)
@@ -483,14 +460,6 @@ class HarnessCliTest(unittest.TestCase):
                         "    Client->>ReportController_php: request",
                         "```",
                         "",
-                        "### Focused Changes Flow",
-                        "",
-                        "```mermaid",
-                        "sequenceDiagram",
-                        "    participant Client",
-                        "    participant ReportController_php",
-                        "    Client->>ReportController_php: changed request",
-                        "```",
                     ]
                 ),
                 1,
@@ -525,15 +494,6 @@ class HarnessCliTest(unittest.TestCase):
                         "### Overall Flow",
                         "",
                         "Client -> Controller -> Domain",
-                        "",
-                        "### Focused Changes Flow",
-                        "",
-                        "```mermaid",
-                        "sequenceDiagram",
-                        "    participant Client",
-                        "    participant ReportController_php",
-                        "    Client->>ReportController_php: changed request",
-                        "```",
                         "",
                         "### Implementation Sketch",
                         "",
@@ -588,15 +548,6 @@ class HarnessCliTest(unittest.TestCase):
                         "    Client->>ReportController_php: request",
                         "~~~",
                         "",
-                        "### Focused Changes Flow",
-                        "",
-                        "~~~mermaid",
-                        "sequenceDiagram",
-                        "    participant Client",
-                        "    participant ReportController_php",
-                        "    Client->>ReportController_php: changed request",
-                        "~~~",
-                        "",
                         "### Implementation Sketch",
                         "",
                         "Pseudocode: change the selected branch only.",
@@ -647,15 +598,6 @@ class HarnessCliTest(unittest.TestCase):
                         "    participant Client",
                         "    participant ReportController_php",
                         "    Client->>ReportController_php: request",
-                        "```",
-                        "",
-                        "### Focused Changes Flow",
-                        "",
-                        "```mermaid",
-                        "sequenceDiagram",
-                        "    participant Client",
-                        "    participant ReportController_php",
-                        "    Client->>ReportController_php: changed request",
                         "```",
                         "",
                         "### Implementation Sketch",
@@ -1152,13 +1094,13 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("Read `.harness/project/index.md`", planning_text)
             self.assertIn("lower-capability implementation agent", planning_text)
             self.assertIn("Overall Flow", planning_text)
-            self.assertIn("Focused Changes Flow", planning_text)
+            self.assertNotIn("Focused Changes Flow", planning_text)
             self.assertIn("Implementation Sketch", planning_text)
             self.assertIn("Decision Table", planning_text)
             self.assertIn("Code Anchors", planning_text)
             implementation_text = (cwd / ".harness" / "agents" / "implementation.md").read_text()
             self.assertIn("Read `### Overall Flow`", implementation_text)
-            self.assertIn("Read `### Focused Changes Flow`", implementation_text)
+            self.assertNotIn("Focused Changes Flow", implementation_text)
             self.assertIn("Follow the `### Implementation Sketch`", implementation_text)
             self.assertIn("Use `### Decision Table`", implementation_text)
             self.assertIn("Use `### Code Anchors`", implementation_text)
