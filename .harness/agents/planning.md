@@ -47,7 +47,8 @@ Planning must include real checklist items in:
 
 - expected file/function/module locations discovered during exploration
 - current behavior to change or preserve
-- a mandatory `### Overall Flow` subsection containing a Mermaid `sequenceDiagram` that shows the end-to-end request/data flow across relevant layers such as client, controller, application/domain service, repository/infrastructure, database, and external calls; label participants with exact discovered files, classes, modules, or call sites where possible, for example `ReportController.php`, `ReportService`, `ReportRepository`, or `PaymentGatewayClient`
+- a mandatory `### Old Flow` subsection containing a Mermaid `sequenceDiagram` that shows the end-to-end request/data flow as it currently exists in the codebase across all relevant layers (client, controller, application/domain service, repository/infrastructure, database, and external calls); label participants with exact existing files, classes, modules, or call sites discovered during exploration, for example `ReportController.php`, `ReportService`, `ReportRepository`, or `PaymentGatewayClient`; for greenfield or new-feature work, diagram the surrounding integration boundary as it exists today — the existing systems, controllers, providers, and their interactions that the new feature will plug into
+- a mandatory `### New Flow` subsection containing a Mermaid `sequenceDiagram` that shows the end-to-end request/data flow after the planned changes, with `alt`/`else` branches to distinguish scoped behavior changes from preserved existing behavior; label participants with exact existing files, classes, modules, or call sites where they overlap with the old flow
 - a mandatory `### Implementation Sketch` subsection containing all pseudocode, sample function shapes, and concrete code-shape steps the implementation agent can follow directly
 - a mandatory `### Decision Flow` subsection containing a Mermaid flowchart that maps each important branch/input state to the expected behavior, metric, return value, or side effect
 - a mandatory `### Code Anchors` subsection naming the exact existing variables, conditions, helper functions, or call sites the implementation must use for key decisions
@@ -56,6 +57,6 @@ Planning must include real checklist items in:
 
 Do not put pseudocode or sample code in a separate top-level section. Keep it inside `### Implementation Sketch` so implementers find the intended code shape in one place.
 
-When revising `## Implementation Guidance`, re-check `### Overall Flow` and update it if target files, dependencies, request/data path, side effects, or client-visible behavior changed.
+When revising `## Implementation Guidance`, re-check `### Old Flow` and `### New Flow` and update them if target files, dependencies, request/data path, side effects, or client-visible behavior changed.
 
 Do not transition to implementation with placeholder `TBD` checklist items.

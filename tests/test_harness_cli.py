@@ -105,7 +105,21 @@ class HarnessCliTest(unittest.TestCase):
     def guidance_placeholder(self) -> str:
         return (
             "## Implementation Guidance\n\nTBD\n\n"
-            "### Overall Flow\n\n"
+            "### Old Flow\n\n"
+            "```mermaid\n"
+            "sequenceDiagram\n"
+            "    participant Client\n"
+            "    participant Old_Controller\n"
+            "    participant Old_Service\n"
+            "    participant Old_RepositoryOrGateway\n"
+            "    Client->>Old_Controller: request\n"
+            "    Old_Controller->>Old_Service: command/query\n"
+            "    Old_Service->>Old_RepositoryOrGateway: persistence or external call\n"
+            "    Old_RepositoryOrGateway-->>Old_Service: result\n"
+            "    Old_Service-->>Old_Controller: response model\n"
+            "    Old_Controller-->>Client: response\n"
+            "```\n\n"
+            "### New Flow\n\n"
             "```mermaid\n"
             "sequenceDiagram\n"
             "    participant Client\n"
@@ -114,10 +128,10 @@ class HarnessCliTest(unittest.TestCase):
             "    participant FileC_RepositoryOrGateway\n"
             "    Client->>FileA_Controller: request\n"
             "    FileA_Controller->>FileB_Service: command/query\n"
-            "    alt important branch or input state\n"
-            "        FileB_Service->>FileB_Service: expected behavior, metric, return value, or side effect\n"
-            "    else alternate branch or input state\n"
-            "        FileB_Service->>FileB_Service: alternate expected behavior, metric, return value, or side effect\n"
+            "    alt scoped change\n"
+            "        FileB_Service->>FileB_Service: apply scoped behavior change\n"
+            "    else existing behavior preserved\n"
+            "        FileB_Service->>FileB_Service: preserve existing behavior\n"
             "    end\n"
             "    FileB_Service->>FileC_RepositoryOrGateway: persistence or external call\n"
             "    FileC_RepositoryOrGateway-->>FileB_Service: result\n"
@@ -134,7 +148,23 @@ class HarnessCliTest(unittest.TestCase):
                 "Expected location: inspect the module named by the requirement before editing.",
                 "Invariants: do not change unrelated routes, validation, persistence, or views unless verification proves they depend on the change.",
                 "",
-                "### Overall Flow",
+                "### Old Flow",
+                "",
+                "```mermaid",
+                "sequenceDiagram",
+                "    participant Client",
+                "    participant ReportController_php",
+                "    participant ReportService",
+                "    participant ReportRepository",
+                "    Client->>ReportController_php: request",
+                "    ReportController_php->>ReportService: command/query",
+                "    ReportService->>ReportRepository: persistence or external call",
+                "    ReportRepository-->>ReportService: result",
+                "    ReportService-->>ReportController_php: response model",
+                "    ReportController_php-->>Client: response",
+                "```",
+                "",
+                "### New Flow",
                 "",
                 "```mermaid",
                 "sequenceDiagram",
@@ -510,7 +540,16 @@ class HarnessCliTest(unittest.TestCase):
                         "",
                         "Use the existing controller and service style.",
                         "",
-                        "### Overall Flow",
+                        "### Old Flow",
+                        "",
+                        "```mermaid",
+                        "sequenceDiagram",
+                        "    participant Client",
+                        "    participant ReportController_php",
+                        "    Client->>ReportController_php: request",
+                        "```",
+                        "",
+                        "### New Flow",
                         "",
                         "```mermaid",
                         "sequenceDiagram",
@@ -550,9 +589,23 @@ class HarnessCliTest(unittest.TestCase):
                         "",
                         "Expected location: controller.",
                         "",
-                        "### Overall Flow",
+                        "### Old Flow",
                         "",
-                        "Client -> Controller -> Domain",
+                        "```mermaid",
+                        "sequenceDiagram",
+                        "    participant Client",
+                        "    participant ReportController_php",
+                        "    Client->>ReportController_php: request",
+                        "    alt scoped behavior applies",
+                        "        ReportController_php->>ReportController_php: apply scoped behavior change",
+                        "    else existing behavior",
+                        "        ReportController_php->>ReportController_php: preserve existing behavior",
+                        "    end",
+                        "```",
+                        "",
+                        "### New Flow",
+                        "",
+                        "Client->>ReportController_php: request with new behavior",
                         "",
                         "### Implementation Sketch",
                         "",
@@ -572,7 +625,7 @@ class HarnessCliTest(unittest.TestCase):
             result = self.run_cli(cwd, "approve-planning", "req-login-timeout", "--by", "Liem", check=False)
 
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("Implementation Guidance must include an Overall Flow Mermaid sequence diagram", result.stdout)
+            self.assertIn("Implementation Guidance must include a New Flow Mermaid sequence diagram showing target behavior", result.stdout)
 
     def test_approve_planning_accepts_tilde_mermaid_sequence_flows(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -592,7 +645,17 @@ class HarnessCliTest(unittest.TestCase):
                         "",
                         "Expected location: controller.",
                         "",
-                        "### Overall Flow",
+                        "### Old Flow",
+                        "",
+                        "~~~mermaid",
+                        "sequenceDiagram",
+                        "    participant Client",
+                        "    participant ReportController_php",
+                        "    Client->>ReportController_php: request",
+                        "    ReportController_php->>ReportController_php: current behavior",
+                        "~~~",
+                        "",
+                        "### New Flow",
                         "",
                         "~~~mermaid",
                         "sequenceDiagram",
@@ -643,7 +706,17 @@ class HarnessCliTest(unittest.TestCase):
                         "",
                         "Expected location: controller.",
                         "",
-                        "### Overall Flow",
+                        "### Old Flow",
+                        "",
+                        "```mermaid",
+                        "sequenceDiagram",
+                        "    participant Client",
+                        "    participant ReportController_php",
+                        "    Client->>ReportController_php: request",
+                        "    ReportController_php->>ReportController_php: current behavior",
+                        "```",
+                        "",
+                        "### New Flow",
                         "",
                         "```mermaid",
                         "sequenceDiagram",
@@ -1153,14 +1226,15 @@ class HarnessCliTest(unittest.TestCase):
             planning_text = (cwd / ".harness" / "agents" / "planning.md").read_text()
             self.assertIn("Read `.harness/project/index.md`", planning_text)
             self.assertIn("lower-capability implementation agent", planning_text)
-            self.assertIn("Overall Flow", planning_text)
-            self.assertIn("When revising `## Implementation Guidance`, re-check `### Overall Flow`", planning_text)
+            self.assertIn("Old Flow", planning_text)
+            self.assertIn("New Flow", planning_text)
+            self.assertIn("When revising `## Implementation Guidance`, re-check `### Old Flow` and `### New Flow`", planning_text)
             self.assertNotIn("Focused Changes Flow", planning_text)
             self.assertIn("Implementation Sketch", planning_text)
             self.assertNotIn("Decision Flow", planning_text)
             self.assertIn("Code Anchors", planning_text)
             implementation_text = (cwd / ".harness" / "agents" / "implementation.md").read_text()
-            self.assertIn("Read `### Overall Flow`", implementation_text)
+            self.assertIn("Read `### Old Flow`", implementation_text)
             self.assertNotIn("Focused Changes Flow", implementation_text)
             self.assertIn("Follow the `### Implementation Sketch`", implementation_text)
             self.assertNotIn("Decision Flow", implementation_text)
