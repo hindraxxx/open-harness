@@ -204,6 +204,11 @@ sequenceDiagram
     participant FileC_RepositoryOrGateway
     Client->>FileA_Controller: request
     FileA_Controller->>FileB_Service: command/query
+    alt important branch or input state
+        FileB_Service->>FileB_Service: expected behavior, metric, return value, or side effect
+    else alternate branch or input state
+        FileB_Service->>FileB_Service: alternate expected behavior, metric, return value, or side effect
+    end
     FileB_Service->>FileC_RepositoryOrGateway: persistence or external call
     FileC_RepositoryOrGateway-->>FileB_Service: result
     FileB_Service-->>FileA_Controller: response model
@@ -213,17 +218,6 @@ sequenceDiagram
 ### Implementation Sketch
 
 TBD
-
-### Decision Flow
-
-```mermaid
-flowchart TD
-    Start([Input or event]) --> Check{Decision condition}
-    Check -->|Case A| CaseA[Expected behavior A]
-    Check -->|Case B| CaseB[Expected behavior B]
-    CaseA --> Result[Observable result]
-    CaseB --> Result
-```
 
 ### Code Anchors
 
@@ -517,9 +511,8 @@ Planning must include real checklist items in:
 
 - expected file/function/module locations discovered during exploration
 - current behavior to change or preserve
-- a mandatory `### Overall Flow` subsection containing a Mermaid `sequenceDiagram` that shows the end-to-end request/data flow across relevant layers such as client, controller, application/domain service, repository/infrastructure, database, and external calls; label participants with exact discovered files, classes, modules, or call sites where possible, for example `ReportController.php`, `ReportService`, `ReportRepository`, or `PaymentGatewayClient`
+- a mandatory `### Overall Flow` subsection containing a Mermaid `sequenceDiagram` that shows the end-to-end request/data flow across relevant layers such as client, controller, application/domain service, repository/infrastructure, database, and external calls; include important branches/input states directly in this diagram with their expected behavior, metric, return value, or side effect; label participants with exact discovered files, classes, modules, or call sites where possible, for example `ReportController.php`, `ReportService`, `ReportRepository`, or `PaymentGatewayClient`
 - a mandatory `### Implementation Sketch` subsection containing all pseudocode, sample function shapes, and concrete code-shape steps the implementation agent can follow directly
-- a mandatory `### Decision Flow` subsection containing a Mermaid flowchart that maps each important branch/input state to the expected behavior, metric, return value, or side effect
 - a mandatory `### Code Anchors` subsection naming the exact existing variables, conditions, helper functions, or call sites the implementation must use for key decisions
 - invariants and out-of-scope areas that must not be changed
 - concrete data cases or examples the implementer should verify
@@ -537,11 +530,10 @@ Implement approved artifact checklist items and tests.
 Before implementation:
 
 1. Read `## Implementation Guidance`.
-2. Read `### Overall Flow` to understand the end-to-end request/data path across client, MVC/DDD layers, infrastructure, and external calls.
+2. Read `### Overall Flow` to understand the end-to-end request/data path, branch behavior, and expected side effects across client, MVC/DDD layers, infrastructure, and external calls.
 3. Follow the `### Implementation Sketch` as the starting code plan.
-4. Use `### Decision Flow` as the source of truth for branch behavior.
-5. Use `### Code Anchors` for the exact existing variables, conditions, helpers, and call sites to modify or preserve.
-6. If the diagrams, sketch, or code anchors are missing, ambiguous, or conflict with current code, stop and return to planning instead of re-planning silently.
+4. Use `### Code Anchors` for the exact existing variables, conditions, helpers, and call sites to modify or preserve.
+5. If the diagrams, sketch, or code anchors are missing, ambiguous, or conflict with current code, stop and return to planning instead of re-planning silently.
 
 Before editing product code, run:
 
@@ -676,7 +668,7 @@ On entry:
    - failed unit tests / build: `## Implementation Checklist` and `## Implementation Guidance`.
    - review fixes: `## Review > Required Fixes`.
    - quality failures: `## Validation Plan` and `## Quality Check > Commands Run`.
-3. Re-read `### Overall Flow`, `### Implementation Sketch`, `### Decision Flow`, and `### Code Anchors`
+3. Re-read `### Overall Flow`, `### Implementation Sketch`, and `### Code Anchors`
    before changing branch behavior.
 
 Before editing product code, run:
@@ -1769,19 +1761,6 @@ def has_mermaid_sequence_subsection(value: str, heading: str) -> bool:
     )
 
 
-def has_mermaid_flowchart_subsection(value: str, heading: str) -> bool:
-    content = subsection(value, heading)
-    if not has_real_content(content):
-        return False
-    return bool(
-        re.search(
-            r"(```|~~~)mermaid\s+.*?\b(flowchart|graph)\b.*?\1",
-            content,
-            re.IGNORECASE | re.DOTALL,
-        )
-    )
-
-
 def has_real_implementation_guidance(value: str) -> bool:
     without_mermaid = re.sub(
         r"(```|~~~)mermaid\s+.*?\1",
@@ -2086,8 +2065,6 @@ def validate_requirements(
             missing.append("Implementation Guidance must include an Overall Flow Mermaid sequence diagram")
         elif not has_implementation_sketch(implementation_guidance):
             missing.append("Implementation Guidance must include an Implementation Sketch with pseudocode or concrete code-shape steps")
-        elif not has_mermaid_flowchart_subsection(implementation_guidance, "Decision Flow"):
-            missing.append("Implementation Guidance must include a Decision Flow Mermaid flowchart mapping branches to expected behavior")
         elif not has_guidance_subsection(implementation_guidance, "Code Anchors"):
             missing.append("Implementation Guidance must include Code Anchors naming exact variables, conditions, helpers, or call sites")
         if not has_real_content(implementation_checklist):

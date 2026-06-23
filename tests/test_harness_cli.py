@@ -59,21 +59,17 @@ class HarnessCliTest(unittest.TestCase):
             "    participant FileC_RepositoryOrGateway\n"
             "    Client->>FileA_Controller: request\n"
             "    FileA_Controller->>FileB_Service: command/query\n"
+            "    alt important branch or input state\n"
+            "        FileB_Service->>FileB_Service: expected behavior, metric, return value, or side effect\n"
+            "    else alternate branch or input state\n"
+            "        FileB_Service->>FileB_Service: alternate expected behavior, metric, return value, or side effect\n"
+            "    end\n"
             "    FileB_Service->>FileC_RepositoryOrGateway: persistence or external call\n"
             "    FileC_RepositoryOrGateway-->>FileB_Service: result\n"
             "    FileB_Service-->>FileA_Controller: response model\n"
             "    FileA_Controller-->>Client: response\n"
             "```\n\n"
             "### Implementation Sketch\n\nTBD\n\n"
-            "### Decision Flow\n\n"
-            "```mermaid\n"
-            "flowchart TD\n"
-            "    Start([Input or event]) --> Check{Decision condition}\n"
-            "    Check -->|Case A| CaseA[Expected behavior A]\n"
-            "    Check -->|Case B| CaseB[Expected behavior B]\n"
-            "    CaseA --> Result[Observable result]\n"
-            "    CaseB --> Result\n"
-            "```\n\n"
             "### Code Anchors\n\nTBD"
         )
 
@@ -93,6 +89,11 @@ class HarnessCliTest(unittest.TestCase):
                 "    participant ReportRepository",
                 "    Client->>ReportController_php: request",
                 "    ReportController_php->>ReportService: command/query",
+                "    alt scoped behavior applies",
+                "        ReportService->>ReportService: apply scoped behavior change",
+                "    else existing behavior",
+                "        ReportService->>ReportService: preserve existing behavior",
+                "    end",
                 "    ReportService->>ReportRepository: persistence or external call",
                 "    ReportRepository-->>ReportService: result",
                 "    ReportService-->>ReportController_php: response model",
@@ -102,17 +103,6 @@ class HarnessCliTest(unittest.TestCase):
                 "### Implementation Sketch",
                 "",
                 "Pseudocode: preserve existing successful flow and apply the scoped behavior change only.",
-                "",
-                "### Decision Flow",
-                "",
-                "```mermaid",
-                "flowchart TD",
-                "    Start([Existing successful flow]) --> Scoped{Scoped behavior applies?}",
-                "    Scoped -->|Yes| Changed[Apply scoped behavior change]",
-                "    Scoped -->|No| Preserve[Preserve existing behavior]",
-                "    Changed --> Result[Return expected response]",
-                "    Preserve --> Result",
-                "```",
                 "",
                 "### Code Anchors",
                 "",
@@ -512,13 +502,6 @@ class HarnessCliTest(unittest.TestCase):
                         "",
                         "Pseudocode: change the selected branch only.",
                         "",
-                        "### Decision Flow",
-                        "",
-                        "```mermaid",
-                        "flowchart TD",
-                        "    Start([Existing flow]) --> Preserve[Preserve]",
-                        "```",
-                        "",
                         "### Code Anchors",
                         "",
                         "- Existing controller condition.",
@@ -560,18 +543,16 @@ class HarnessCliTest(unittest.TestCase):
                         "    participant Client",
                         "    participant ReportController_php",
                         "    Client->>ReportController_php: request",
+                        "    alt scoped behavior applies",
+                        "        ReportController_php->>ReportController_php: apply scoped behavior change",
+                        "    else existing behavior",
+                        "        ReportController_php->>ReportController_php: preserve existing behavior",
+                        "    end",
                         "~~~",
                         "",
                         "### Implementation Sketch",
                         "",
                         "Pseudocode: change the selected branch only.",
-                        "",
-                        "### Decision Flow",
-                        "",
-                        "~~~mermaid",
-                        "flowchart TD",
-                        "    Start([Existing flow]) --> Preserve[Preserve]",
-                        "~~~",
                         "",
                         "### Code Anchors",
                         "",
@@ -588,7 +569,7 @@ class HarnessCliTest(unittest.TestCase):
 
             self.assertIn("planning approved by Liem", result.stdout)
 
-    def test_approve_planning_requires_decision_flow_and_code_anchors(self):
+    def test_approve_planning_requires_code_anchors(self):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)
             self.run_cli(cwd, "init")
@@ -613,6 +594,11 @@ class HarnessCliTest(unittest.TestCase):
                         "    participant Client",
                         "    participant ReportController_php",
                         "    Client->>ReportController_php: request",
+                        "    alt scoped behavior applies",
+                        "        ReportController_php->>ReportController_php: apply scoped behavior change",
+                        "    else existing behavior",
+                        "        ReportController_php->>ReportController_php: preserve existing behavior",
+                        "    end",
                         "```",
                         "",
                         "### Implementation Sketch",
@@ -629,7 +615,7 @@ class HarnessCliTest(unittest.TestCase):
             result = self.run_cli(cwd, "approve-planning", "req-login-timeout", "--by", "Liem", check=False)
 
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("Implementation Guidance must include a Decision Flow Mermaid flowchart", result.stdout)
+            self.assertIn("Implementation Guidance must include Code Anchors", result.stdout)
 
     def test_planning_changes_after_approval_block_preflight(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1112,13 +1098,13 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("When revising `## Implementation Guidance`, re-check `### Overall Flow`", planning_text)
             self.assertNotIn("Focused Changes Flow", planning_text)
             self.assertIn("Implementation Sketch", planning_text)
-            self.assertIn("Decision Flow", planning_text)
+            self.assertNotIn("Decision Flow", planning_text)
             self.assertIn("Code Anchors", planning_text)
             implementation_text = (cwd / ".harness" / "agents" / "implementation.md").read_text()
             self.assertIn("Read `### Overall Flow`", implementation_text)
             self.assertNotIn("Focused Changes Flow", implementation_text)
             self.assertIn("Follow the `### Implementation Sketch`", implementation_text)
-            self.assertIn("Use `### Decision Flow`", implementation_text)
+            self.assertNotIn("Decision Flow", implementation_text)
             self.assertIn("Use `### Code Anchors`", implementation_text)
             self.assertTrue((cwd / ".harness" / "agents" / "needs-fix.md").exists())
             needs_fix_text = (cwd / ".harness" / "agents" / "needs-fix.md").read_text()
