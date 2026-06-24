@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import json
 import importlib.machinery
 import importlib.util
 from contextlib import redirect_stderr, redirect_stdout
@@ -308,6 +309,163 @@ class HarnessCliTest(unittest.TestCase):
             with sqlite3.connect(cwd / ".harness" / "harness.db") as conn:
                 row = conn.execute("SELECT state FROM sessions WHERE session_id = ?", ("req-login-timeout",)).fetchone()
             self.assertEqual(("start",), row)
+
+    def test_plan_epic_splits_three_stories_into_child_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+
+            result = self.run_cli(
+                cwd,
+                "plan-epic",
+                "epic-approval",
+                "--story",
+                "story-001:Maker submits request",
+                "--story",
+                "story-002:Checker reviews request",
+                "--story",
+                "story-003:Audit trail",
+            )
+
+            epic = cwd / ".harness" / "requirements" / "epic-approval"
+            self.assertIn("mode: child-session", result.stdout)
+            self.assertTrue((epic / "epic-plan.md").exists())
+            self.assertTrue((epic / "synthesis.md").exists())
+            index_html = epic / "index.html"
+            self.assertTrue(index_html.exists())
+            self.assertIn("stories/story-001/plan.html", index_html.read_text())
+            story_plan = epic / "stories" / "story-001" / "plan.md"
+            story_html = epic / "stories" / "story-001" / "plan.html"
+            metadata_path = epic / "stories" / "story-001" / "metadata.json"
+            self.assertTrue(story_plan.exists())
+            self.assertTrue(story_html.exists())
+            metadata = json.loads(metadata_path.read_text())
+            self.assertEqual("epic-approval", metadata["epic_id"])
+            self.assertEqual("story-001", metadata["story_id"])
+            self.assertEqual("Maker submits request", metadata["title"])
+            self.assertEqual("", metadata["planning_session_id"])
+            self.assertEqual("stories/story-001/plan.md", metadata["plan_md"])
+            self.assertEqual("stories/story-001/plan.html", metadata["plan_html"])
+            self.assertEqual("draft", metadata["status"])
+            self.assertEqual([], metadata["dependencies"])
+            self.assertEqual(1, metadata["implementation_order"])
+
+    def test_plan_epic_defaults_two_stories_to_single_session(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+
+            result = self.run_cli(
+                cwd,
+                "plan-epic",
+                "epic-small",
+                "--story",
+                "story-001:First behavior",
+                "--story",
+                "story-002:Second behavior",
+            )
+
+            epic = cwd / ".harness" / "requirements" / "epic-small"
+            self.assertIn("mode: single-session", result.stdout)
+            self.assertTrue((epic / "index.html").exists())
+            self.assertFalse((epic / "stories" / "story-001" / "metadata.json").exists())
+
+    def test_plan_epic_split_override_creates_child_artifacts_for_two_stories(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+
+            result = self.run_cli(
+                cwd,
+                "plan-epic",
+                "epic-two-large",
+                "--split-stories",
+                "--story",
+                "story-001:Large backend behavior",
+                "--story",
+                "story-002:Large frontend behavior",
+            )
+
+            epic = cwd / ".harness" / "requirements" / "epic-two-large"
+            self.assertIn("mode: child-session", result.stdout)
+            self.assertTrue((epic / "stories" / "story-001" / "plan.html").exists())
+            self.assertTrue((epic / "stories" / "story-002" / "metadata.json").exists())
+
+    def test_implement_resolves_ready_story_from_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            self.run_cli(
+                cwd,
+                "plan-epic",
+                "epic-approval",
+                "--split-stories",
+                "--story",
+                "story-001:Maker submits request",
+            )
+            metadata_path = cwd / ".harness" / "requirements" / "epic-approval" / "stories" / "story-001" / "metadata.json"
+            metadata = json.loads(metadata_path.read_text())
+            metadata["status"] = "ready"
+            metadata["planning_session_id"] = "child-session-id-a"
+            metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n")
+
+            result = self.run_cli(cwd, "implement", "story-001")
+
+            self.assertIn("implementation target: story-001", result.stdout)
+            self.assertIn("epic: epic-approval", result.stdout)
+            self.assertIn("status: ready", result.stdout)
+            self.assertIn("planning_session_id: child-session-id-a", result.stdout)
+            self.assertIn(".harness/requirements/epic-approval/stories/story-001/plan.md", result.stdout)
+
+    def test_implement_blocks_missing_and_not_ready_stories(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            missing = self.run_cli(cwd, "implement", "story-404", check=False)
+            self.assertNotEqual(0, missing.returncode)
+            self.assertIn("story not found: story-404", missing.stderr)
+
+            self.run_cli(
+                cwd,
+                "plan-epic",
+                "epic-approval",
+                "--split-stories",
+                "--story",
+                "story-001:Maker submits request",
+            )
+            blocked = self.run_cli(cwd, "implement", "story-001", check=False)
+            self.assertNotEqual(0, blocked.returncode)
+            self.assertIn("story story-001 is not ready for implementation: status=draft", blocked.stderr)
+
+    def test_implement_blocks_until_dependencies_are_done(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            self.run_cli(
+                cwd,
+                "plan-epic",
+                "epic-approval",
+                "--split-stories",
+                "--story",
+                "story-001:Maker submits request",
+                "--story",
+                "story-002:Checker reviews request",
+            )
+            story_1_metadata = cwd / ".harness" / "requirements" / "epic-approval" / "stories" / "story-001" / "metadata.json"
+            story_1 = json.loads(story_1_metadata.read_text())
+            story_1["status"] = "ready"
+            story_1_metadata.write_text(json.dumps(story_1, indent=2, sort_keys=True) + "\n")
+            story_2_metadata = cwd / ".harness" / "requirements" / "epic-approval" / "stories" / "story-002" / "metadata.json"
+            story_2 = json.loads(story_2_metadata.read_text())
+            story_2["status"] = "ready"
+            story_2["dependencies"] = ["story-001"]
+            story_2_metadata.write_text(json.dumps(story_2, indent=2, sort_keys=True) + "\n")
+
+            result = self.run_cli(cwd, "implement", "story-002", check=False)
+
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("implementation blocked", result.stdout)
+            self.assertIn("- dependency story-001: status=ready", result.stdout)
 
     def test_status_refreshes_html_from_current_markdown_and_escapes_content(self):
         with tempfile.TemporaryDirectory() as tmp:

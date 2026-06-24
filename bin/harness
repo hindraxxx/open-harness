@@ -17,7 +17,7 @@ from pathlib import Path
 
 
 MAX_RECOVERY_ATTEMPTS = 3
-HARNESS_VERSION = "2026.06.24.6"
+HARNESS_VERSION = "2026.06.24.7"
 
 LANGUAGE_SKILLS = [
     {"name": "java-springboot", "url": "https://raw.githubusercontent.com/github/awesome-copilot/main/skills/java-springboot/SKILL.md"},
@@ -51,6 +51,14 @@ def sessions_dir() -> Path:
     return harness_dir() / "sessions"
 
 
+def requirements_dir() -> Path:
+    return harness_dir() / "requirements"
+
+
+def epic_dir(epic_id: str) -> Path:
+    return requirements_dir() / epic_id
+
+
 def agents_dir() -> Path:
     return harness_dir() / "agents"
 
@@ -69,6 +77,34 @@ def artifact_path(session_id: str) -> Path:
 
 def artifact_html_path(session_id: str) -> Path:
     return artifact_path(session_id).with_suffix(".html")
+
+
+def epic_index_path(epic_id: str) -> Path:
+    return epic_dir(epic_id) / "index.html"
+
+
+def epic_plan_path(epic_id: str) -> Path:
+    return epic_dir(epic_id) / "epic-plan.md"
+
+
+def epic_synthesis_path(epic_id: str) -> Path:
+    return epic_dir(epic_id) / "synthesis.md"
+
+
+def story_dir(epic_id: str, story_id: str) -> Path:
+    return epic_dir(epic_id) / "stories" / story_id
+
+
+def story_plan_path(epic_id: str, story_id: str) -> Path:
+    return story_dir(epic_id, story_id) / "plan.md"
+
+
+def story_plan_html_path(epic_id: str, story_id: str) -> Path:
+    return story_dir(epic_id, story_id) / "plan.html"
+
+
+def story_metadata_path(epic_id: str, story_id: str) -> Path:
+    return story_dir(epic_id, story_id) / "metadata.json"
 
 
 def proof_dir(session_id: str) -> Path:
@@ -1234,6 +1270,200 @@ def render_markdown_body(body: str) -> str:
     flush_list()
     flush_table()
     return "\n".join(parts)
+
+
+def render_markdown_document(
+    md_path: Path,
+    html_path: Path,
+    title: str,
+    eyebrow: str,
+    metadata: dict[str, str] | None = None,
+) -> Path:
+    return render_markdown_content_document(read_text(md_path), html_path, title, eyebrow, metadata)
+
+
+def render_markdown_content_document(
+    body: str,
+    html_path: Path,
+    title: str,
+    eyebrow: str,
+    metadata: dict[str, str] | None = None,
+) -> Path:
+    meta_rows = ""
+    if metadata:
+        meta_rows = "".join(
+            f"<tr><th>{html.escape(key)}</th><td>{html.escape(value)}</td></tr>"
+            for key, value in metadata.items()
+        )
+    aside = ""
+    if meta_rows:
+        aside = f"""
+<aside class="meta-card">
+<h2>Metadata</h2>
+<table class="meta">{meta_rows}</table>
+</aside>
+"""
+    document = f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{html.escape(title)}</title>
+<style>
+:root {{
+  color-scheme: light;
+  font-family: "Avenir Next", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+  --ink: #17202a;
+  --muted: #637083;
+  --line: #d9e0e8;
+  --paper: #ffffff;
+  --wash: #f4f6f8;
+  --accent: #176d73;
+  --accent-soft: #dff1f1;
+  --code: #18212f;
+}}
+* {{ box-sizing: border-box; }}
+body {{
+  margin: 0;
+  background: var(--wash);
+  color: var(--ink);
+  line-height: 1.55;
+}}
+main {{
+  width: min(1180px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 34px 0 64px;
+}}
+.hero {{
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 24px;
+  padding-bottom: 18px;
+}}
+.eyebrow {{
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  margin: 0 0 8px;
+  text-transform: uppercase;
+}}
+h1, h2, h3, h4 {{
+  color: var(--ink);
+  line-height: 1.18;
+  margin: 1.35em 0 0.58em;
+}}
+h1 {{
+  font-size: clamp(2rem, 4vw, 3.1rem);
+  letter-spacing: 0;
+  margin: 0;
+}}
+h2 {{
+  border-top: 1px solid var(--line);
+  font-size: 1.42rem;
+  padding-top: 1.2rem;
+}}
+h3 {{ font-size: 1.08rem; }}
+p, li {{ font-size: 0.98rem; overflow-wrap: anywhere; }}
+p {{ margin: 0.7rem 0; max-width: 76ch; }}
+ul {{ padding-left: 1.15rem; }}
+ol {{ padding-left: 1.35rem; }}
+li {{ margin: 0.35rem 0; }}
+a {{ color: #0f5f66; font-weight: 650; }}
+pre {{
+  overflow-x: auto;
+  background: var(--code);
+  color: #f7fafc;
+  padding: 16px 18px;
+  border-radius: 7px;
+}}
+code {{
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  word-break: break-word;
+}}
+pre code {{ overflow-wrap: normal; white-space: pre; word-break: normal; }}
+table {{
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  overflow: hidden;
+}}
+th, td {{
+  border-bottom: 1px solid var(--line);
+  padding: 9px 11px;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}}
+tr:last-child th, tr:last-child td {{ border-bottom: 0; }}
+th {{
+  background: #edf3f5;
+  color: #334155;
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  width: 32%;
+}}
+.shell {{
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+  gap: 20px;
+  align-items: start;
+}}
+.content, .meta-card {{
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 24px;
+}}
+.meta-card {{ position: sticky; top: 20px; }}
+.meta-card h2 {{
+  border: 0;
+  font-size: 0.9rem;
+  letter-spacing: 0.06em;
+  margin: 0 0 12px;
+  padding: 0;
+  text-transform: uppercase;
+}}
+.meta {{ margin: 0; font-size: 0.85rem; }}
+.meta th, .meta td {{ padding: 7px 8px; }}
+.check {{
+  color: var(--accent);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-weight: 700;
+}}
+@media (max-width: 860px) {{
+  main {{ width: min(100% - 28px, 720px); padding-top: 24px; }}
+  .shell {{ grid-template-columns: 1fr; }}
+  .meta-card {{ position: static; order: -1; }}
+  .content, .meta-card {{ padding: 20px; }}
+}}
+</style>
+</head>
+<body>
+<main>
+<section class="hero">
+<p class="eyebrow">{html.escape(eyebrow)}</p>
+<h1>{html.escape(title)}</h1>
+</section>
+<div class="shell">
+<article class="content">
+{render_markdown_body(body)}
+</article>
+{aside}
+</div>
+</main>
+</body>
+</html>
+"""
+    html_path.parent.mkdir(parents=True, exist_ok=True)
+    html_path.write_text(document)
+    return html_path
 
 
 def render_artifact_html(session_id: str) -> Path | None:
@@ -2428,9 +2658,301 @@ def cmd_update(args: argparse.Namespace) -> None:
     sync_target_guardrails(force=True)
 
 
+def validate_requirement_id(value: str, label: str) -> None:
+    if not re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]*$", value):
+        die(f"{label} must use letters, numbers, dot, underscore, or dash")
+
+
+def parse_story_arg(raw: str, index: int) -> dict[str, str]:
+    value = raw.strip()
+    if not value:
+        die("--story must not be empty")
+    if ":" in value:
+        story_id, title = value.split(":", 1)
+        story_id = story_id.strip()
+        title = title.strip() or story_id
+    else:
+        if re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]*$", value):
+            story_id = value
+            title = value
+        else:
+            story_id = f"story-{index:03d}"
+            title = value
+    validate_requirement_id(story_id, "story id")
+    return {"story_id": story_id, "title": title}
+
+
+def planning_mode(story_count: int, force_single: bool, force_split: bool) -> str:
+    if force_single and force_split:
+        die("choose only one of --single-session or --split-stories")
+    if force_single:
+        return "single-session"
+    if force_split:
+        return "child-session"
+    if story_count >= 3:
+        return "child-session"
+    return "single-session"
+
+
+def default_epic_plan(epic_id: str, mode: str, stories: list[dict[str, str]]) -> str:
+    story_rows = "\n".join(
+        f"| {story['story_id']} | {story['title']} | draft |"
+        for story in stories
+    )
+    return f"""# Epic Plan: {epic_id}
+
+## Planning Mode Decision
+
+Mode: {mode}
+
+## Story Registry
+
+| Story | Title | Status |
+|---|---|---|
+{story_rows}
+
+## Requirement Summary
+
+TBD
+
+## Cross-Story Dependencies
+
+TBD
+
+## Open Questions
+
+- [ ] TBD
+"""
+
+
+def default_synthesis(epic_id: str, stories: list[dict[str, str]]) -> str:
+    queue_rows = "\n".join(
+        f"| {index} | {story['story_id']} | draft | TBD |"
+        for index, story in enumerate(stories, start=1)
+    )
+    return f"""# Epic Synthesis: {epic_id}
+
+## Implementation Queue
+
+| Order | Story | Status | Reason |
+|---|---|---|---|
+{queue_rows}
+
+## Shared Decisions
+
+TBD
+
+## Blockers
+
+- [ ] TBD
+"""
+
+
+def default_story_plan(epic_id: str, story: dict[str, str], mode: str) -> str:
+    return f"""# Story Plan: {story['story_id']}
+
+## Source Epic
+
+{epic_id}
+
+## Title
+
+{story['title']}
+
+## Planning Mode
+
+{mode}
+
+## Behavior / Acceptance Criteria
+
+- [ ] TBD
+
+## Out of Scope
+
+TBD
+
+## Dependencies
+
+- [ ] TBD
+
+## Implementation Plan
+
+TBD
+
+## Test Plan
+
+- [ ] TBD
+
+## Open Questions
+
+- [ ] TBD
+"""
+
+
+def story_metadata(epic_id: str, story: dict[str, str], index: int) -> dict[str, object]:
+    return {
+        "epic_id": epic_id,
+        "story_id": story["story_id"],
+        "title": story["title"],
+        "planning_session_id": "",
+        "plan_md": f"stories/{story['story_id']}/plan.md",
+        "plan_html": f"stories/{story['story_id']}/plan.html",
+        "status": "draft",
+        "dependencies": [],
+        "implementation_order": index,
+    }
+
+
+def write_json(path: Path, data: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+
+
+def load_story_metadata(path: Path) -> dict[str, object]:
+    try:
+        data = json.loads(read_text(path))
+    except json.JSONDecodeError as exc:
+        die(f"invalid story metadata {path}: {exc}")
+    if not isinstance(data, dict):
+        die(f"invalid story metadata {path}: expected object")
+    return data
+
+
+def find_story_metadata(story_id: str) -> tuple[Path, dict[str, object]]:
+    matches = []
+    for path in requirements_dir().glob(f"*/stories/{story_id}/metadata.json"):
+        matches.append((path, load_story_metadata(path)))
+    if not matches:
+        die(f"story not found: {story_id}")
+    if len(matches) > 1:
+        locations = ", ".join(str(path.parent) for path, _data in matches)
+        die(f"story id is ambiguous across epics: {story_id} ({locations})")
+    return matches[0]
+
+
+def metadata_by_story_id(story_id: str) -> dict[str, object] | None:
+    for path in requirements_dir().glob(f"*/stories/{story_id}/metadata.json"):
+        return load_story_metadata(path)
+    return None
+
+
+def render_story_plan(epic_id: str, story: dict[str, str], metadata: dict[str, object]) -> Path:
+    string_metadata = {key: str(value) for key, value in metadata.items() if key != "dependencies"}
+    return render_markdown_document(
+        story_plan_path(epic_id, story["story_id"]),
+        story_plan_html_path(epic_id, story["story_id"]),
+        f"Story Plan: {story['story_id']}",
+        "Harness Story Plan",
+        string_metadata,
+    )
+
+
+def render_epic_index(epic_id: str, mode: str, stories: list[dict[str, str]]) -> Path:
+    rows = []
+    for story in stories:
+        story_id = story["story_id"]
+        story_html = f"stories/{story_id}/plan.html"
+        metadata_file = story_metadata_path(epic_id, story_id)
+        status = "draft"
+        if metadata_file.exists():
+            data = load_story_metadata(metadata_file)
+            status = str(data.get("status", "draft"))
+        rows.append(f"| [{story_id}]({story_html}) | {story['title']} | {status} |")
+    story_table = "\n".join(rows) if rows else "| _single-session_ | See epic plan | draft |"
+    content = f"""# Epic Planning Index: {epic_id}
+
+## Mode
+
+{mode}
+
+## Artifacts
+
+- [Epic plan](epic-plan.md)
+- [Synthesis](synthesis.md)
+
+## Stories
+
+| Story | Title | Status |
+|---|---|---|
+{story_table}
+"""
+    return render_markdown_content_document(
+        content,
+        epic_index_path(epic_id),
+        f"Epic Planning Index: {epic_id}",
+        "Harness Epic Index",
+        {"epic_id": epic_id, "mode": mode, "story_count": str(len(stories))},
+    )
+
+
+def cmd_plan_epic(args: argparse.Namespace) -> None:
+    validate_requirement_id(args.epic_id, "epic id")
+    raw_stories = args.story or ["story-001:TBD"]
+    stories = [parse_story_arg(raw, index) for index, raw in enumerate(raw_stories, start=1)]
+    story_ids = [story["story_id"] for story in stories]
+    if len(story_ids) != len(set(story_ids)):
+        die("duplicate story id in --story arguments")
+    mode = planning_mode(len(stories), args.single_session, args.split_stories)
+    base = epic_dir(args.epic_id)
+    if base.exists() and not args.force:
+        die(f"epic already exists: {args.epic_id}; rerun with --force to overwrite planning artifacts")
+    base.mkdir(parents=True, exist_ok=True)
+    epic_plan_path(args.epic_id).write_text(default_epic_plan(args.epic_id, mode, stories))
+    epic_synthesis_path(args.epic_id).write_text(default_synthesis(args.epic_id, stories))
+    if mode == "child-session":
+        for index, story in enumerate(stories, start=1):
+            metadata = story_metadata(args.epic_id, story, index)
+            story_plan_path(args.epic_id, story["story_id"]).parent.mkdir(parents=True, exist_ok=True)
+            story_plan_path(args.epic_id, story["story_id"]).write_text(default_story_plan(args.epic_id, story, mode))
+            write_json(story_metadata_path(args.epic_id, story["story_id"]), metadata)
+            render_story_plan(args.epic_id, story, metadata)
+    render_epic_index(args.epic_id, mode, stories if mode == "child-session" else [])
+    print(f"planned epic: {args.epic_id}")
+    print(f"mode: {mode}")
+    print(f"epic plan: {epic_plan_path(args.epic_id)}")
+    print(f"synthesis: {epic_synthesis_path(args.epic_id)}")
+    print(f"index: {epic_index_path(args.epic_id)}")
+    if mode == "child-session":
+        for story in stories:
+            print(f"story: {story['story_id']} {story_plan_path(args.epic_id, story['story_id'])}")
+
+
+def cmd_implement(args: argparse.Namespace) -> None:
+    validate_requirement_id(args.story_id, "story id")
+    metadata_file, data = find_story_metadata(args.story_id)
+    status = str(data.get("status", "draft"))
+    if status != "ready":
+        die(f"story {args.story_id} is not ready for implementation: status={status}")
+    dependencies = data.get("dependencies", [])
+    if not isinstance(dependencies, list):
+        die(f"story {args.story_id} has invalid dependencies in {metadata_file}")
+    blocked = []
+    for dependency in dependencies:
+        dependency_data = metadata_by_story_id(str(dependency))
+        if not dependency_data:
+            blocked.append(f"{dependency}: missing")
+        elif dependency_data.get("status") != "done":
+            blocked.append(f"{dependency}: status={dependency_data.get('status', 'draft')}")
+    if blocked:
+        print("implementation blocked")
+        for item in blocked:
+            print(f"- dependency {item}")
+        raise SystemExit(1)
+    epic_base = metadata_file.parents[2]
+    plan_md = epic_base / str(data.get("plan_md", f"stories/{args.story_id}/plan.md"))
+    plan_html = epic_base / str(data.get("plan_html", f"stories/{args.story_id}/plan.html"))
+    if not plan_md.exists():
+        die(f"story plan missing: {plan_md}")
+    print(f"implementation target: {args.story_id}")
+    print(f"epic: {data.get('epic_id', epic_base.name)}")
+    print(f"status: {status}")
+    print(f"plan: {plan_md}")
+    print(f"html: {plan_html}")
+    print(f"planning_session_id: {data.get('planning_session_id', '')}")
+
+
 def cmd_start(args: argparse.Namespace) -> None:
-    if not re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]*$", args.session_id):
-        die("session id must use letters, numbers, dot, underscore, or dash")
+    validate_requirement_id(args.session_id, "session id")
     if artifact_path(args.session_id).exists():
         die(f"session already exists: {args.session_id}")
     warn_if_guardrails_outdated()
@@ -3002,6 +3524,18 @@ def build_parser() -> argparse.ArgumentParser:
     start_p = sub.add_parser("start")
     start_p.add_argument("session_id")
     start_p.set_defaults(func=cmd_start)
+
+    plan_epic_p = sub.add_parser("plan-epic")
+    plan_epic_p.add_argument("epic_id")
+    plan_epic_p.add_argument("--story", action="append", default=[])
+    plan_epic_p.add_argument("--single-session", action="store_true")
+    plan_epic_p.add_argument("--split-stories", action="store_true")
+    plan_epic_p.add_argument("--force", action="store_true")
+    plan_epic_p.set_defaults(func=cmd_plan_epic)
+
+    implement_p = sub.add_parser("implement")
+    implement_p.add_argument("story_id")
+    implement_p.set_defaults(func=cmd_implement)
 
     migrate_p = sub.add_parser("migrate-sqlite")
     migrate_p.set_defaults(func=cmd_migrate_sqlite)
