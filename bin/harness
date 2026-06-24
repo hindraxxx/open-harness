@@ -17,7 +17,7 @@ from pathlib import Path
 
 
 MAX_RECOVERY_ATTEMPTS = 3
-HARNESS_VERSION = "2026.06.24.8"
+HARNESS_VERSION = "2026.06.24.9"
 
 LANGUAGE_SKILLS = [
     {"name": "java-springboot", "url": "https://raw.githubusercontent.com/github/awesome-copilot/main/skills/java-springboot/SKILL.md"},
@@ -51,12 +51,8 @@ def sessions_dir() -> Path:
     return harness_dir() / "sessions"
 
 
-def requirements_dir() -> Path:
-    return harness_dir() / "requirements"
-
-
 def epic_dir(epic_id: str) -> Path:
-    return requirements_dir() / epic_id
+    return sessions_dir() / epic_id
 
 
 def agents_dir() -> Path:
@@ -92,7 +88,7 @@ def epic_synthesis_path(epic_id: str) -> Path:
 
 
 def story_dir(epic_id: str, story_id: str) -> Path:
-    return epic_dir(epic_id) / "stories" / story_id
+    return epic_dir(epic_id) / "children" / story_id
 
 
 def story_plan_path(epic_id: str, story_id: str) -> Path:
@@ -2795,8 +2791,8 @@ def story_metadata(epic_id: str, story: dict[str, str], index: int) -> dict[str,
         "story_id": story["story_id"],
         "title": story["title"],
         "planning_session_id": "",
-        "plan_md": f"stories/{story['story_id']}/plan.md",
-        "plan_html": f"stories/{story['story_id']}/plan.html",
+        "plan_md": f"children/{story['story_id']}/plan.md",
+        "plan_html": f"children/{story['story_id']}/plan.html",
         "status": "draft",
         "dependencies": [],
         "implementation_order": index,
@@ -2820,7 +2816,7 @@ def load_story_metadata(path: Path) -> dict[str, object]:
 
 def find_story_metadata(story_id: str) -> tuple[Path, dict[str, object]]:
     matches = []
-    for path in requirements_dir().glob(f"*/stories/{story_id}/metadata.json"):
+    for path in sessions_dir().glob(f"*/children/{story_id}/metadata.json"):
         matches.append((path, load_story_metadata(path)))
     if not matches:
         die(f"story not found: {story_id}")
@@ -2831,7 +2827,7 @@ def find_story_metadata(story_id: str) -> tuple[Path, dict[str, object]]:
 
 
 def metadata_by_story_id(story_id: str) -> dict[str, object] | None:
-    for path in requirements_dir().glob(f"*/stories/{story_id}/metadata.json"):
+    for path in sessions_dir().glob(f"*/children/{story_id}/metadata.json"):
         return load_story_metadata(path)
     return None
 
@@ -2851,7 +2847,7 @@ def render_epic_index(epic_id: str, mode: str, stories: list[dict[str, str]]) ->
     rows = []
     for story in stories:
         story_id = story["story_id"]
-        story_html = f"stories/{story_id}/plan.html"
+        story_html = f"children/{story_id}/plan.html"
         metadata_file = story_metadata_path(epic_id, story_id)
         status = "draft"
         if metadata_file.exists():
@@ -2885,6 +2881,19 @@ def render_epic_index(epic_id: str, mode: str, stories: list[dict[str, str]]) ->
     )
 
 
+def write_story_artifacts(epic_id: str, stories: list[dict[str, str]], mode: str, force: bool = False) -> None:
+    for index, story in enumerate(stories, start=1):
+        plan_path = story_plan_path(epic_id, story["story_id"])
+        metadata_path = story_metadata_path(epic_id, story["story_id"])
+        if (plan_path.exists() or metadata_path.exists()) and not force:
+            die(f"story already exists: {story['story_id']}; rerun with --force to overwrite child artifacts")
+        metadata = story_metadata(epic_id, story, index)
+        plan_path.parent.mkdir(parents=True, exist_ok=True)
+        plan_path.write_text(default_story_plan(epic_id, story, mode))
+        write_json(metadata_path, metadata)
+        render_story_plan(epic_id, story, metadata)
+
+
 def cmd_plan_epic(args: argparse.Namespace) -> None:
     validate_requirement_id(args.epic_id, "epic id")
     raw_stories = args.story or ["story-001:TBD"]
@@ -2900,12 +2909,7 @@ def cmd_plan_epic(args: argparse.Namespace) -> None:
     epic_plan_path(args.epic_id).write_text(default_epic_plan(args.epic_id, mode, stories))
     epic_synthesis_path(args.epic_id).write_text(default_synthesis(args.epic_id, stories))
     if mode == "child-session":
-        for index, story in enumerate(stories, start=1):
-            metadata = story_metadata(args.epic_id, story, index)
-            story_plan_path(args.epic_id, story["story_id"]).parent.mkdir(parents=True, exist_ok=True)
-            story_plan_path(args.epic_id, story["story_id"]).write_text(default_story_plan(args.epic_id, story, mode))
-            write_json(story_metadata_path(args.epic_id, story["story_id"]), metadata)
-            render_story_plan(args.epic_id, story, metadata)
+        write_story_artifacts(args.epic_id, stories, mode, force=args.force)
     render_epic_index(args.epic_id, mode, stories if mode == "child-session" else [])
     print(f"planned epic: {args.epic_id}")
     print(f"mode: {mode}")
@@ -2915,6 +2919,32 @@ def cmd_plan_epic(args: argparse.Namespace) -> None:
     if mode == "child-session":
         for story in stories:
             print(f"story: {story['story_id']} {story_plan_path(args.epic_id, story['story_id'])}")
+
+
+def cmd_split_session(args: argparse.Namespace) -> None:
+    validate_requirement_id(args.session_id, "session id")
+    state = current_state(args.session_id)
+    if state != "planning":
+        die(f"split-session requires session state 'planning', current state is '{state}'")
+    if not args.story:
+        die("split-session requires at least one --story")
+    stories = [parse_story_arg(raw, index) for index, raw in enumerate(args.story, start=1)]
+    story_ids = [story["story_id"] for story in stories]
+    if len(story_ids) != len(set(story_ids)):
+        die("duplicate story id in --story arguments")
+    if not epic_plan_path(args.session_id).exists() or args.force:
+        epic_plan_path(args.session_id).write_text(default_epic_plan(args.session_id, "child-session", stories))
+    if not epic_synthesis_path(args.session_id).exists() or args.force:
+        epic_synthesis_path(args.session_id).write_text(default_synthesis(args.session_id, stories))
+    write_story_artifacts(args.session_id, stories, "child-session", force=args.force)
+    render_epic_index(args.session_id, "child-session", stories)
+    render_artifact_html(args.session_id)
+    print(f"split session: {args.session_id}")
+    print("mode: child-session")
+    print(f"parent artifact: {artifact_path(args.session_id)}")
+    print(f"index: {epic_index_path(args.session_id)}")
+    for story in stories:
+        print(f"story: {story['story_id']} {story_plan_path(args.session_id, story['story_id'])}")
 
 
 def cmd_implement(args: argparse.Namespace) -> None:
@@ -2939,8 +2969,8 @@ def cmd_implement(args: argparse.Namespace) -> None:
             print(f"- dependency {item}")
         raise SystemExit(1)
     epic_base = metadata_file.parents[2]
-    plan_md = epic_base / str(data.get("plan_md", f"stories/{args.story_id}/plan.md"))
-    plan_html = epic_base / str(data.get("plan_html", f"stories/{args.story_id}/plan.html"))
+    plan_md = epic_base / str(data.get("plan_md", f"children/{args.story_id}/plan.md"))
+    plan_html = epic_base / str(data.get("plan_html", f"children/{args.story_id}/plan.html"))
     if not plan_md.exists():
         die(f"story plan missing: {plan_md}")
     print(f"implementation target: {args.story_id}")
@@ -3532,6 +3562,12 @@ def build_parser() -> argparse.ArgumentParser:
     plan_epic_p.add_argument("--split-stories", action="store_true")
     plan_epic_p.add_argument("--force", action="store_true")
     plan_epic_p.set_defaults(func=cmd_plan_epic)
+
+    split_session_p = sub.add_parser("split-session")
+    split_session_p.add_argument("session_id")
+    split_session_p.add_argument("--story", action="append", default=[])
+    split_session_p.add_argument("--force", action="store_true")
+    split_session_p.set_defaults(func=cmd_split_session)
 
     implement_p = sub.add_parser("implement")
     implement_p.add_argument("story_id")
