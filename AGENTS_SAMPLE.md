@@ -6,6 +6,7 @@ canonical rule set; this file is the entry checklist.
 0. If unsure the setup is healthy, run `harness doctor`.
 1. Identify the session id from the user request, current artifact, or `harness list`.
    If no session exists yet, choose a short kebab-case session id that summarizes the request and create it with `harness start <session-id>` before continuing.
+   If the user asks to split the current session/work/plan, treat "split" as a request for child-session planning under the current parent session. Use `harness split-session <parent-session-id> --story ...` in `planning` state instead of creating a separate top-level session, unless the user explicitly asks for an independent new session.
 2. Run `harness status <session-id>`.
 3. Read `.harness/agents/common.md`.
 4. Read `.harness/project/index.md` if present.

@@ -17,7 +17,7 @@ from pathlib import Path
 
 
 MAX_RECOVERY_ATTEMPTS = 3
-HARNESS_VERSION = "2026.06.24.9"
+HARNESS_VERSION = "2026.06.24.10"
 
 LANGUAGE_SKILLS = [
     {"name": "java-springboot", "url": "https://raw.githubusercontent.com/github/awesome-copilot/main/skills/java-springboot/SKILL.md"},
@@ -512,6 +512,13 @@ Before doing harness work:
 - Treat `.harness/project/` as orientation only. Verify relevant facts against current code before using them.
 - If a project-map section is stale or missing during planning, update that section before filling the session artifact.
 
+## Split Session Requests
+
+- If the user asks to split the current session, work, plan, or analysis, treat "split" as child-session planning under the current parent session.
+- Use `harness split-session <parent-session-id> --story ...` while the parent is in `planning`; transition from `start` to `planning` first if needed.
+- Do not create a separate top-level session for a split request unless the user explicitly asks for an independent new session.
+- Generated child story metadata starts with an empty `planning_session_id`; fill it only after a real child planning session exists and is intentionally linked.
+
 ## Final Response Gate
 
 Before any final response during harness work:
@@ -930,6 +937,7 @@ canonical rule set; this file is the entry checklist.
 0. If unsure the setup is healthy, run `harness doctor`.
 1. Identify the session id from the user request, current artifact, or `harness list`.
    If no session exists yet, choose a short kebab-case session id that summarizes the request and create it with `harness start <session-id>` before continuing.
+   If the user asks to split the current session/work/plan, treat "split" as a request for child-session planning under the current parent session. Use `harness split-session <parent-session-id> --story ...` in `planning` state instead of creating a separate top-level session, unless the user explicitly asks for an independent new session.
 2. Run `harness status <session-id>`.
 3. Read `.harness/agents/common.md`.
 4. Read `.harness/project/index.md` if present.
@@ -1114,29 +1122,59 @@ def dump_frontmatter(data: dict[str, str], body: str) -> str:
 
 
 def render_inline_markdown(value: str) -> str:
-    escaped = html.escape(value)
+    def find_strong_end(text: str, start: int) -> int:
+        index = start
+        while index < len(text):
+            if text[index] == "`":
+                close = text.find("`", index + 1)
+                if close == -1:
+                    return -1
+                index = close + 1
+                continue
+            if text.startswith("**", index):
+                return index
+            index += 1
+        return -1
 
-    def render_text(text: str) -> str:
-        with_links = re.sub(
-            r"\[([^\]]+)\]\(([^)]+)\)",
-            lambda match: f'<a href="{html.escape(match.group(2), quote=True)}">{match.group(1)}</a>',
-            text,
-        )
-        return re.sub(
-            r"\*\*([^*\n]+)\*\*",
-            lambda match: f"<strong>{match.group(1)}</strong>",
-            with_links,
-        )
+    def parse(text: str) -> str:
+        rendered = []
+        plain = []
+        index = 0
 
-    parts = re.split(r"(`[^`]+`)", escaped)
-    rendered = []
-    for part in parts:
-        code = re.fullmatch(r"`([^`]+)`", part)
-        if code:
-            rendered.append(f"<code>{code.group(1)}</code>")
-        else:
-            rendered.append(render_text(part))
-    return "".join(rendered)
+        def flush_plain() -> None:
+            if plain:
+                rendered.append(html.escape("".join(plain)))
+                plain.clear()
+
+        while index < len(text):
+            if text[index] == "`":
+                close = text.find("`", index + 1)
+                if close != -1:
+                    flush_plain()
+                    rendered.append(f"<code>{html.escape(text[index + 1:close])}</code>")
+                    index = close + 1
+                    continue
+            if text.startswith("**", index):
+                close = find_strong_end(text, index + 2)
+                if close != -1:
+                    flush_plain()
+                    rendered.append(f"<strong>{parse(text[index + 2:close])}</strong>")
+                    index = close + 2
+                    continue
+            link = re.match(r"\[([^\]]+)\]\(([^)]+)\)", text[index:])
+            if link:
+                flush_plain()
+                label = html.escape(link.group(1))
+                href = html.escape(link.group(2), quote=True)
+                rendered.append(f'<a href="{href}">{label}</a>')
+                index += link.end()
+                continue
+            plain.append(text[index])
+            index += 1
+        flush_plain()
+        return "".join(rendered)
+
+    return parse(value)
 
 
 def render_markdown_table(lines: list[str]) -> str:
