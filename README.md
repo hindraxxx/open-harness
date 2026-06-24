@@ -61,15 +61,11 @@ From a target repo that already uses harness, update the installed harness sourc
 harness update
 ```
 
-`harness update` pulls the `workflow-project` repo behind the running `bin/harness`, then compares the target repo's `.harness/version` to the current CLI version. If the target guardrails are outdated, it runs the same overwrite path as:
-
-```bash
-harness sync-guardrails --force
-```
+`harness update` pulls the `workflow-project` repo behind the running `bin/harness`, then refreshes the target repo's guardrails and records the current CLI version in `.harness/version`.
 
 `harness start <session-id>` checks this version too. If local guardrails are outdated it prints a warning to run `harness update`, but it does not pull code or overwrite files during session start.
 
-- `harness sync-guardrails --force` overwrites agent guardrail files and bootstrap instructions.
+- `harness sync-guardrails` remains as a deprecated compatibility alias for the local refresh part of `harness update`.
 
 ## Test
 

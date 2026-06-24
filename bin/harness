@@ -17,7 +17,7 @@ from pathlib import Path
 
 
 MAX_RECOVERY_ATTEMPTS = 3
-HARNESS_VERSION = "2026.06.24.4"
+HARNESS_VERSION = "2026.06.24.6"
 
 LANGUAGE_SKILLS = [
     {"name": "java-springboot", "url": "https://raw.githubusercontent.com/github/awesome-copilot/main/skills/java-springboot/SKILL.md"},
@@ -148,6 +148,14 @@ def target_guardrails_outdated() -> bool:
 def warn_if_guardrails_outdated() -> None:
     if target_guardrails_outdated():
         print("warning: target guardrails are outdated; run harness update", file=sys.stderr)
+
+
+def version_label(version: str | None) -> str:
+    return version if version else "none"
+
+
+def print_harness_version_change(previous: str | None) -> None:
+    print(f"harness version: {version_label(previous)} -> {HARNESS_VERSION}")
 
 
 def ensure_gitignore() -> None:
@@ -2339,6 +2347,7 @@ def install_language_skills(force: bool = False) -> list[str]:
 
 
 def cmd_init(_args: argparse.Namespace) -> None:
+    previous_version = read_harness_version()
     harness_dir().mkdir(exist_ok=True)
     sessions_dir().mkdir(parents=True, exist_ok=True)
     agents_dir().mkdir(parents=True, exist_ok=True)
@@ -2355,6 +2364,7 @@ def cmd_init(_args: argparse.Namespace) -> None:
     write_project_map(overwrite=False)
     ensure_gitignore()
     print("initialized harness")
+    print_harness_version_change(previous_version)
     installed = install_language_skills()
     if installed:
         print(f"installed language skills: {', '.join(installed)}")
@@ -2386,35 +2396,36 @@ def print_synced_guardrails(written: list[Path]) -> None:
         print(f"- {path.relative_to(root())}")
 
 
-def cmd_sync_guardrails(args: argparse.Namespace) -> None:
-    if not args.force:
-        die(f"sync-guardrails overwrites {agents_bootstrap_path().name} and .harness/agents/*.md; rerun with --force")
-    print_synced_guardrails(overwrite_guardrails())
-    installed = install_language_skills(force=True)
-    if installed:
-        print(f"installed/refreshed language skills: {', '.join(installed)}")
-
-
-def cmd_upgrade_guardrails(_args: argparse.Namespace) -> None:
-    print_synced_guardrails(overwrite_guardrails())
-
-
-def sync_target_guardrails_if_outdated() -> None:
-    if target_guardrails_outdated():
+def sync_target_guardrails(force: bool = False) -> None:
+    previous_version = read_harness_version()
+    if force or target_guardrails_outdated():
         print_synced_guardrails(overwrite_guardrails())
+        print_harness_version_change(previous_version)
         print("target guardrails synced")
         installed = install_language_skills(force=True)
         if installed:
             print(f"installed/refreshed language skills: {', '.join(installed)}")
     else:
         print("target guardrails current")
+        print_harness_version_change(previous_version)
+
+
+def cmd_sync_guardrails(args: argparse.Namespace) -> None:
+    print("sync-guardrails is deprecated; use `harness update`")
+    sync_target_guardrails(force=True)
+
+
+def cmd_upgrade_guardrails(_args: argparse.Namespace) -> None:
+    previous_version = read_harness_version()
+    print_synced_guardrails(overwrite_guardrails())
+    print_harness_version_change(previous_version)
 
 
 def cmd_update(args: argparse.Namespace) -> None:
     if not args.skip_pull:
         if update_harness_source(harness_source_root()):
             os.execv(sys.executable, [sys.executable, str(Path(__file__).resolve()), "update", "--skip-pull"])
-    sync_target_guardrails_if_outdated()
+    sync_target_guardrails(force=True)
 
 
 def cmd_start(args: argparse.Namespace) -> None:

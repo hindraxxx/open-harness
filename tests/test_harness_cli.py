@@ -273,7 +273,7 @@ class HarnessCliTest(unittest.TestCase):
     def test_init_creates_project_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)
-            self.run_cli(cwd, "init")
+            result = self.run_cli(cwd, "init")
 
             self.assertTrue((cwd / ".harness" / "harness.yml").exists())
             self.assertTrue((cwd / ".harness" / "harness.db").exists())
@@ -283,6 +283,7 @@ class HarnessCliTest(unittest.TestCase):
             self.assertTrue((cwd / "AGENTS.md").exists())
             self.assertIn(".env", (cwd / ".gitignore").read_text().splitlines())
             self.assertEqual(self.harness_module.HARNESS_VERSION, (cwd / ".harness" / "version").read_text().strip())
+            self.assertIn(f"harness version: none -> {self.harness_module.HARNESS_VERSION}", result.stdout)
 
     def test_start_uses_local_session_id_and_sqlite_state(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1244,17 +1245,18 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("harness validate <session-id>", text)
             self.assertIn("harness recover <session-id>", text)
 
-    def test_sync_guardrails_requires_force(self):
+    def test_sync_guardrails_aliases_update_with_deprecation_notice(self):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)
             self.run_cli(cwd, "init")
 
-            result = self.run_cli(cwd, "sync-guardrails", check=False)
+            result = self.run_cli(cwd, "sync-guardrails")
 
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("--force", result.stderr)
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("sync-guardrails is deprecated; use `harness update`", result.stdout)
+            self.assertIn("target guardrails synced", result.stdout)
 
-    def test_sync_guardrails_force_overwrites_agent_files(self):
+    def test_update_overwrites_agent_files_and_reports_version_change(self):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)
             self.run_cli(cwd, "init")
@@ -1262,11 +1264,13 @@ class HarnessCliTest(unittest.TestCase):
             (cwd / ".harness" / "agents" / "implementation.md").write_text("old\n")
             (cwd / ".harness" / "version").write_text("0\n")
 
-            result = self.run_cli(cwd, "sync-guardrails", "--force")
+            result = self.run_cli(cwd, "update", "--skip-pull")
 
             self.assertIn("synced harness guardrails", result.stdout)
             self.assertIn("- AGENTS.md", result.stdout)
             self.assertIn("- .harness/version", result.stdout)
+            self.assertIn(f"harness version: 0 -> {self.harness_module.HARNESS_VERSION}", result.stdout)
+            self.assertIn("target guardrails synced", result.stdout)
             self.assertEqual(self.harness_module.HARNESS_VERSION, (cwd / ".harness" / "version").read_text().strip())
             self.assertIn("preflight-edit", (cwd / "AGENTS.md").read_text())
             self.assertIn("Implementation State Guardrails", (cwd / ".harness" / "agents" / "implementation.md").read_text())
@@ -1328,17 +1332,20 @@ class HarnessCliTest(unittest.TestCase):
 
             self.assertIn("synced harness guardrails", result.stdout)
             self.assertIn("target guardrails synced", result.stdout)
+            self.assertIn(f"harness version: 0 -> {self.harness_module.HARNESS_VERSION}", result.stdout)
             self.assertIn("Harness Agent Bootstrap", (cwd / "AGENTS.md").read_text())
             self.assertEqual(self.harness_module.HARNESS_VERSION, (cwd / ".harness" / "version").read_text().strip())
 
-    def test_update_skip_pull_does_nothing_when_target_guardrails_are_current(self):
+    def test_update_skip_pull_refreshes_when_target_guardrails_are_current(self):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)
             self.run_cli(cwd, "init")
 
             result = self.run_cli(cwd, "update", "--skip-pull")
 
-            self.assertEqual("target guardrails current\n", result.stdout)
+            self.assertIn("synced harness guardrails", result.stdout)
+            self.assertIn(f"harness version: {self.harness_module.HARNESS_VERSION} -> {self.harness_module.HARNESS_VERSION}", result.stdout)
+            self.assertIn("target guardrails synced", result.stdout)
 
     def test_update_pulls_harness_source_when_behind_origin_main(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1351,7 +1358,7 @@ class HarnessCliTest(unittest.TestCase):
             result = self.run_temp_cli(cli, target, "update")
 
             self.assertIn("pulled latest harness source", result.stdout)
-            self.assertIn("target guardrails current", result.stdout)
+            self.assertIn("target guardrails synced", result.stdout)
             self.assertEqual("v2\n", (source / "README.md").read_text())
 
     def test_update_aborts_before_pull_when_harness_source_is_dirty(self):
@@ -1381,7 +1388,7 @@ class HarnessCliTest(unittest.TestCase):
             self.assertNotEqual(drift.returncode, 0)
             self.assertIn("AGENTS_SAMPLE.md", drift.stdout)
 
-            result = self.run_cli(cwd, "sync-guardrails", "--force")
+            result = self.run_cli(cwd, "update", "--skip-pull")
             self.assertIn("- AGENTS_SAMPLE.md", result.stdout)
             self.assertIn("Harness Agent Bootstrap", (cwd / "AGENTS_SAMPLE.md").read_text())
             self.assertFalse((cwd / "AGENTS.md").exists())
