@@ -2,6 +2,28 @@
 
 Explore first. Ask blocking ambiguity questions. Write acceptance criteria, validation plan, implementation guidance, and implementation checklist.
 
+## Session Structure
+
+Decide whether this work is one session or multiple child sessions before filling the rest of the artifact. Do not decide by story count alone.
+
+Cluster the requirement into independent units of behavior. Each unit must be able to stand alone with its own Old Flow / New Flow sequence diagram, validation plan, and proof. A unit that only makes sense after another ships is a dependent story, not a separate session.
+
+Use child sessions (split) when the work decomposes into two or more units that:
+
+- have disjoint code surfaces (different endpoints, services, or screens with no shared edit surface that would cause merge conflicts if worked in parallel)
+- can each be validated with an independent proof and acceptance criteria
+- can be accepted or rejected independently
+
+Keep a single session when the work is one cohesive change:
+
+- one Old Flow / New Flow sequence diagram covers the end-to-end change cleanly
+- acceptance criteria and validation plan apply to the whole change together
+- splitting would produce sessions that cannot be understood or validated in isolation
+
+If you decide to split, run `harness split-session <session-id> --story <story-id>:<title> ...` while this session is in `planning`. Fill each child's `dependencies` from the natural ordering of the work. Do not split just because the change is large; split only when units are independently shippable.
+
+If you are unsure, keep a single session. A session can be split later if implementation reveals genuinely independent work.
+
 Allowed:
 
 - read/search files

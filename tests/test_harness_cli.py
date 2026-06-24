@@ -312,7 +312,7 @@ class HarnessCliTest(unittest.TestCase):
                 row = conn.execute("SELECT state FROM sessions WHERE session_id = ?", ("req-login-timeout",)).fetchone()
             self.assertEqual(("start",), row)
 
-    def test_plan_epic_splits_three_stories_into_child_artifacts(self):
+    def test_plan_epic_split_flag_creates_child_artifacts(self):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)
             self.run_cli(cwd, "init")
@@ -321,6 +321,7 @@ class HarnessCliTest(unittest.TestCase):
                 cwd,
                 "plan-epic",
                 "epic-approval",
+                "--split-stories",
                 "--story",
                 "story-001:Maker submits request",
                 "--story",
@@ -378,6 +379,28 @@ class HarnessCliTest(unittest.TestCase):
             )
 
             epic = cwd / ".harness" / "sessions" / "epic-small"
+            self.assertIn("mode: single-session", result.stdout)
+            self.assertTrue((epic / "index.html").exists())
+            self.assertFalse((epic / "children" / "story-001" / "metadata.json").exists())
+
+    def test_plan_epic_defaults_three_stories_to_single_session(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+
+            result = self.run_cli(
+                cwd,
+                "plan-epic",
+                "epic-three",
+                "--story",
+                "story-001:First behavior",
+                "--story",
+                "story-002:Second behavior",
+                "--story",
+                "story-003:Third behavior",
+            )
+
+            epic = cwd / ".harness" / "sessions" / "epic-three"
             self.assertIn("mode: single-session", result.stdout)
             self.assertTrue((epic / "index.html").exists())
             self.assertFalse((epic / "children" / "story-001" / "metadata.json").exists())
