@@ -17,7 +17,7 @@ from pathlib import Path
 
 
 MAX_RECOVERY_ATTEMPTS = 3
-HARNESS_VERSION = "2026.06.24.3"
+HARNESS_VERSION = "2026.06.24.4"
 
 LANGUAGE_SKILLS = [
     {"name": "java-springboot", "url": "https://raw.githubusercontent.com/github/awesome-copilot/main/skills/java-springboot/SKILL.md"},
@@ -2311,6 +2311,8 @@ def skills_dir() -> Path:
 
 
 def install_language_skills(force: bool = False) -> list[str]:
+    if os.environ.get("HARNESS_SKIP_LANGUAGE_SKILLS") == "1":
+        return []
     installed = []
     existing = set()
     sd = skills_dir()

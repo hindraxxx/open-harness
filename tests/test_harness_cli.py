@@ -2,10 +2,13 @@ import os
 import shutil
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import unittest
 import importlib.machinery
 import importlib.util
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 from pathlib import Path
 from typing import Optional
 
@@ -34,15 +37,35 @@ class HarnessCliTest(unittest.TestCase):
         command_env.pop("LINEAR_API_KEY", None)
         command_env.pop("LINEAR_TEAM_ID", None)
         command_env.pop("LINEAR_PROJECT_ID", None)
+        command_env["HARNESS_SKIP_LANGUAGE_SKILLS"] = "1"
         if env:
             command_env.update(env)
-        result = subprocess.run(
+        old_cwd = Path.cwd()
+        old_argv = sys.argv
+        old_env = os.environ.copy()
+        stdout = StringIO()
+        stderr = StringIO()
+        returncode = 0
+        try:
+            os.chdir(cwd)
+            os.environ.clear()
+            os.environ.update(command_env)
+            sys.argv = [str(CLI), *args]
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                try:
+                    self.harness_module.main()
+                except SystemExit as exc:
+                    returncode = exc.code if isinstance(exc.code, int) else 1
+        finally:
+            sys.argv = old_argv
+            os.environ.clear()
+            os.environ.update(old_env)
+            os.chdir(old_cwd)
+        result = subprocess.CompletedProcess(
             [str(CLI), *args],
-            cwd=cwd,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=command_env,
+            returncode,
+            stdout.getvalue(),
+            stderr.getvalue(),
         )
         if check and result.returncode != 0:
             self.fail(f"command failed: {args}\nstdout={result.stdout}\nstderr={result.stderr}")
@@ -55,12 +78,15 @@ class HarnessCliTest(unittest.TestCase):
         *args: str,
         check: bool = True,
     ) -> subprocess.CompletedProcess:
+        command_env = os.environ.copy()
+        command_env["HARNESS_SKIP_LANGUAGE_SKILLS"] = "1"
         result = subprocess.run(
             [str(cli), *args],
             cwd=cwd,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            env=command_env,
         )
         if check and result.returncode != 0:
             self.fail(f"command failed: {args}\nstdout={result.stdout}\nstderr={result.stderr}")
