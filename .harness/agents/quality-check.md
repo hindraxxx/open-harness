@@ -25,6 +25,8 @@ Failed validation goes through:
 harness recover <session-id> --reason "quality check failed: <summary>"
 ```
 
+Recovery clears prior review approval, quality approval, and active quality evidence. The next pass must re-enter review and record fresh quality commands/proof/manual validation.
+
 Manual auth blockers require human validation notes, but quality-check still needs at least one attached proof file under `proof/`.
 
 Proof policy is configured in `.harness/harness.yml`:

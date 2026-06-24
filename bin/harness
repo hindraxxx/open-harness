@@ -17,7 +17,7 @@ from pathlib import Path
 
 
 MAX_RECOVERY_ATTEMPTS = 3
-HARNESS_VERSION = "2026.06.24.11"
+HARNESS_VERSION = "2026.06.24.12"
 
 LANGUAGE_SKILLS = [
     {"name": "java-springboot", "url": "https://raw.githubusercontent.com/github/awesome-copilot/main/skills/java-springboot/SKILL.md"},
@@ -589,7 +589,8 @@ harness recover <session-id> --reason "what failed"
 ```
 
 This increments `recovery_attempts` and transitions to `needs-fix`. After 3 recovery attempts, the next recovery request transitions to `blocked` and stops automation.
-Recovering from `quality-check` or `approval` clears any prior quality approval and resets `## Final Approval` to `TBD`.
+Recovering from `review`, `quality-check`, or `approval` clears prior review approval and resets `## Review > Human Review` to `TBD`.
+Recovering from `quality-check` or `approval` also clears quality approval, resets `## Final Approval` to `TBD`, and removes stale quality commands/proof/manual validation from the active gate.
 """,
         "start.md": """# Start State Guardrails
 
@@ -763,6 +764,8 @@ Required fixes go through:
 harness recover <session-id> --reason "open review item: <summary>"
 ```
 
+Recovery clears prior review approval and resets `## Review > Human Review` to `TBD`.
+
 Quality-check requires explicit human approval:
 
 ```bash
@@ -808,6 +811,8 @@ Failed validation goes through:
 harness recover <session-id> --reason "quality check failed: <summary>"
 ```
 
+Recovery clears prior review approval, quality approval, and active quality evidence. The next pass must re-enter review and record fresh quality commands/proof/manual validation.
+
 Manual auth blockers require human validation notes, but quality-check still needs at least one attached proof file under `proof/`.
 
 Proof policy is configured in `.harness/harness.yml`:
@@ -823,6 +828,9 @@ Proof policy is configured in `.harness/harness.yml`:
 Recovery state entered after a failed build, unit test, review, quality-check, or
 approval. Product code edits are allowed directly in this state so the agent can
 fix the recorded failure before returning through implementation.
+
+Entering from `review`, `quality-check`, or `approval` invalidates prior review approval so the next pass requires fresh human review.
+Entering from `quality-check` or `approval` also clears active quality evidence so stale proof cannot satisfy the next quality gate.
 
 On entry:
 
@@ -910,6 +918,7 @@ harness recover <session-id> --reason "quality approval rejected: <summary>"
 ```
 
 Recovery clears quality approval and resets `## Final Approval` to `TBD`.
+It also clears prior review approval and active quality evidence so the next pass must be re-reviewed and re-proven.
 """,
         "done.md": """# Done State Guardrails
 
@@ -2064,6 +2073,38 @@ def clear_quality_approval(session_id: str) -> None:
         )
 
 
+def clear_review_approval(session_id: str) -> None:
+    path = artifact_path(session_id)
+    data, body = parse_frontmatter(read_text(path))
+    data.update(
+        {
+            "review_approved": "false",
+            "review_approved_by": "",
+            "review_approved_at": "",
+            "updated_at": now(),
+        }
+    )
+    body = replace_subsection(body, "Review", "Human Review", "TBD")
+    path.write_text(dump_frontmatter(data, body))
+    with db() as conn:
+        conn.execute(
+            "DELETE FROM approvals WHERE session_id = ? AND approval_type = ?",
+            (session_id, "review"),
+        )
+
+
+def clear_quality_evidence(session_id: str) -> None:
+    path = artifact_path(session_id)
+    data, body = parse_frontmatter(read_text(path))
+    body = replace_subsection(body, "Quality Check", "Commands Run", "TBD")
+    body = replace_subsection(body, "Quality Check", "Proof", "- [ ] TBD")
+    body = replace_subsection(body, "Quality Check", "Manual Validation", "TBD")
+    data["updated_at"] = now()
+    path.write_text(dump_frontmatter(data, body))
+    with db() as conn:
+        conn.execute("DELETE FROM proofs WHERE session_id = ?", (session_id,))
+
+
 def insert_review_pass(session_id: str, content: str) -> None:
     with db() as conn:
         conn.execute(
@@ -2375,11 +2416,11 @@ def check_section_items(text: str, heading: str) -> str:
 
 
 def replace_subsection(text: str, section_heading: str, subsection_heading: str, content: str) -> str:
-    section_match = re.search(rf"^## {re.escape(section_heading)}\s*$", text, re.MULTILINE)
+    section_match = re.search(rf"^## {re.escape(section_heading)}[ \t]*$", text, re.MULTILINE)
     if not section_match:
         return text.rstrip() + f"\n\n## {section_heading}\n\n### {subsection_heading}\n\n{content.strip()}\n"
     subsection_match = re.search(
-        rf"^### {re.escape(subsection_heading)}\s*$",
+        rf"^### {re.escape(subsection_heading)}[ \t]*$",
         text[section_match.end() :],
         re.MULTILINE,
     )
@@ -3465,10 +3506,13 @@ def cmd_recover(args: argparse.Namespace) -> None:
     if not reason:
         die("recover requires a non-empty --reason")
     attempts = recovery_attempts(args.session_id)
+    if state in {"review", "quality-check", "approval"}:
+        clear_review_approval(args.session_id)
+    if state in {"quality-check", "approval"}:
+        clear_quality_approval(args.session_id)
+        clear_quality_evidence(args.session_id)
     if attempts >= MAX_RECOVERY_ATTEMPTS:
         if state != "blocked":
-            if state in {"quality-check", "approval"}:
-                clear_quality_approval(args.session_id)
             set_session_state(args.session_id, "blocked")
             record_transition(args.session_id, state, "blocked", "blocked", reason)
         print(f"recovery blocked: {attempts}/{MAX_RECOVERY_ATTEMPTS} attempts used")
@@ -3476,8 +3520,6 @@ def cmd_recover(args: argparse.Namespace) -> None:
         raise SystemExit(1)
     attempts += 1
     set_recovery_attempts(args.session_id, attempts)
-    if state in {"quality-check", "approval"}:
-        clear_quality_approval(args.session_id)
     if state == "needs-fix":
         record_transition(args.session_id, state, state, "recovery", reason)
         print(f"recovery attempt recorded: {attempts}/{MAX_RECOVERY_ATTEMPTS}")

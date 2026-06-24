@@ -25,6 +25,13 @@ Before doing harness work:
 - Treat `.harness/project/` as orientation only. Verify relevant facts against current code before using them.
 - If a project-map section is stale or missing during planning, update that section before filling the session artifact.
 
+## Split Session Requests
+
+- If the user asks to split the current session, work, plan, or analysis, treat "split" as child-session planning under the current parent session.
+- Use `harness split-session <parent-session-id> --story ...` while the parent is in `planning`; transition from `start` to `planning` first if needed.
+- Do not create a separate top-level session for a split request unless the user explicitly asks for an independent new session.
+- Generated child story metadata starts with an empty `planning_session_id`; fill it only after a real child planning session exists and is intentionally linked.
+
 ## Final Response Gate
 
 Before any final response during harness work:
@@ -72,4 +79,5 @@ harness recover <session-id> --reason "what failed"
 ```
 
 This increments `recovery_attempts` and transitions to `needs-fix`. After 3 recovery attempts, the next recovery request transitions to `blocked` and stops automation.
-Recovering from `quality-check` or `approval` clears any prior quality approval and resets `## Final Approval` to `TBD`.
+Recovering from `review`, `quality-check`, or `approval` clears prior review approval and resets `## Review > Human Review` to `TBD`.
+Recovering from `quality-check` or `approval` also clears quality approval, resets `## Final Approval` to `TBD`, and removes stale quality commands/proof/manual validation from the active gate.

@@ -1234,6 +1234,30 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn('status: "needs-fix"', artifact.read_text())
             self.assertIn('recovery_attempts: "1"', artifact.read_text())
 
+    def test_review_recovery_clears_review_approval(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            artifact = self.enter_review(cwd)
+            artifact.write_text(
+                artifact.read_text()
+                .replace("### AI Review\n\nTBD", "### AI Review\n\nNo blocking issues.")
+                .replace("### Human Review\n\nTBD", "### Human Review\n\nLooks correct.")
+            )
+            self.run_cli(cwd, "approve-review", "req-login-timeout", "--by", "Liem")
+
+            self.run_cli(cwd, "recover", "req-login-timeout", "--reason", "review item changed code")
+
+            text = artifact.read_text()
+            self.assertIn('review_approved: "false"', text)
+            self.assertIn('review_approved_by: ""', text)
+            self.assertIn("### Human Review\n\nTBD", text)
+            with sqlite3.connect(cwd / ".harness" / "harness.db") as conn:
+                count = conn.execute(
+                    "SELECT COUNT(*) FROM approvals WHERE session_id = ? AND approval_type = ?",
+                    ("req-login-timeout", "review"),
+                ).fetchone()[0]
+            self.assertEqual(0, count)
+
     def test_needs_fix_preflight_allows_fix_work_with_unchecked_items_and_product_changes(self):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)
@@ -1291,7 +1315,7 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("review -> needs-fix recovery reason: open review item: Add validation proof", result.stdout)
             self.assertIn("Approvals", result.stdout)
             self.assertIn("planning by Liem", result.stdout)
-            self.assertIn("review by Liem", result.stdout)
+            self.assertNotIn("review by Liem", result.stdout)
             self.assertIn("Review Passes", result.stdout)
             self.assertIn("Review found a validation gap. Second line ignored.", result.stdout)
             self.assertIn("Required Fixes", result.stdout)
@@ -1350,6 +1374,25 @@ class HarnessCliTest(unittest.TestCase):
 
             self.assertIn("transitioned: quality-check -> needs-fix", result.stdout)
             self.assertIn('status: "needs-fix"', artifact.read_text())
+
+    def test_quality_recovery_clears_stale_quality_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            artifact = self.enter_quality_check(cwd)
+            self.complete_quality_check(cwd, artifact)
+
+            self.run_cli(cwd, "recover", "req-login-timeout", "--reason", "quality check failed")
+
+            text = artifact.read_text()
+            self.assertIn("### Commands Run\n\nTBD", text)
+            self.assertIn("### Proof\n\n- [ ] TBD", text)
+            self.assertIn("### Manual Validation\n\nTBD", text)
+            with sqlite3.connect(cwd / ".harness" / "harness.db") as conn:
+                count = conn.execute(
+                    "SELECT COUNT(*) FROM proofs WHERE session_id = ?",
+                    ("req-login-timeout",),
+                ).fetchone()[0]
+            self.assertEqual(0, count)
 
     def test_implementation_reports_quality_evidence_recorded_too_early(self):
         with tempfile.TemporaryDirectory() as tmp:

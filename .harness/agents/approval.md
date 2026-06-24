@@ -10,11 +10,12 @@ On entry:
 3. Only after explicit user approval, run:
 
 ```bash
-harness approve-quality <session-id> --by <human-name>
+harness approve-quality <session-id>
 harness transition <session-id> done
 ```
 
 Agents must not run `approve-quality` unless the user explicitly instructs them to approve quality evidence.
+`approve-quality` uses `whoami` for the approver name by default; pass `--by <human-name>` only to override it.
 
 Forbidden:
 
@@ -29,3 +30,4 @@ harness recover <session-id> --reason "quality approval rejected: <summary>"
 ```
 
 Recovery clears quality approval and resets `## Final Approval` to `TBD`.
+It also clears prior review approval and active quality evidence so the next pass must be re-reviewed and re-proven.
