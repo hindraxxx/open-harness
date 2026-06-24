@@ -17,7 +17,7 @@ from pathlib import Path
 
 
 MAX_RECOVERY_ATTEMPTS = 3
-HARNESS_VERSION = "2026.06.24.12"
+HARNESS_VERSION = "2026.06.24.13"
 
 LANGUAGE_SKILLS = [
     {"name": "java-springboot", "url": "https://raw.githubusercontent.com/github/awesome-copilot/main/skills/java-springboot/SKILL.md"},
@@ -540,6 +540,10 @@ Before doing harness work:
 - If the user asks to split the current session, work, plan, or analysis, treat "split" as child-session planning under the current parent session.
 - Use `harness split-session <parent-session-id> --story ...` while the parent is in `planning`; transition from `start` to `planning` first if needed.
 - Do not create a separate top-level session for a split request unless the user explicitly asks for an independent new session.
+- Child story/session ids are traceability artifacts by default; they do not require spawning subagents.
+- Use a subagent or separate child planning session only when a story can be planned independently and its output can be reconciled into the parent plan.
+- Pros of subagent child planning: parallel discovery, smaller per-story context, clearer story ownership, and a concrete `planning_session_id` audit link.
+- Cons of subagent child planning: duplicated discovery, context fragmentation, parent/child drift, extra review and approval gates, and more coordination overhead.
 - Generated child story metadata starts with an empty `planning_session_id`; fill it only after a real child planning session exists and is intentionally linked.
 
 ## Final Response Gate
@@ -648,7 +652,8 @@ Before filling the session artifact:
 1. Read `.harness/project/index.md` if present.
 2. Verify relevant project-map facts by repo search or file inspection.
 3. Update stale or missing project-map sections with verified facts.
-4. Then fill `## Requirement Summary`, `## Acceptance Criteria`, `## Validation Plan`, `## Implementation Guidance`, and `## Implementation Checklist`.
+4. Decide whether split/child-session planning needs subagents. Default to one planning agent unless stories are independent enough for delegated planning and the parent plan will explicitly reconcile the child outputs.
+5. Then fill `## Requirement Summary`, `## Acceptance Criteria`, `## Validation Plan`, `## Implementation Guidance`, and `## Implementation Checklist`.
 
 Planning must include real checklist items in:
 
@@ -970,6 +975,7 @@ canonical rule set; this file is the entry checklist.
 1. Identify the session id from the user request, current artifact, or `harness list`.
    If no session exists yet, choose a short kebab-case session id that summarizes the request and create it with `harness start <session-id>` before continuing.
    If the user asks to split the current session/work/plan, treat "split" as a request for child-session planning under the current parent session. Use `harness split-session <parent-session-id> --story ...` in `planning` state instead of creating a separate top-level session, unless the user explicitly asks for an independent new session.
+   Child story/session ids are traceability artifacts by default; use subagents only when stories can be planned independently and reconciled into the parent plan. Keep `planning_session_id` empty unless a real delegated child planning session exists.
 2. Run `harness status <session-id>`.
 3. Read `.harness/agents/common.md`.
 4. Read `.harness/project/index.md` if present.
@@ -2897,6 +2903,27 @@ def default_story_plan(epic_id: str, story: dict[str, str], mode: str, metadata:
 ## Planning Mode
 
 {mode}
+
+## Subagent Planning Decision
+
+Use subagents only if this story can be planned independently and reconciled into the parent plan.
+
+Pros:
+
+- Parallel discovery
+- Smaller per-story context
+- Clearer story ownership
+- Concrete `planning_session_id` audit link when a real child planning session exists
+
+Cons:
+
+- Duplicated discovery
+- Context fragmentation
+- Parent/child plan drift
+- Extra review and approval gates
+- More coordination overhead
+
+Decision: TBD
 
 ## Behavior / Acceptance Criteria
 

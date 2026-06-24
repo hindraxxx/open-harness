@@ -283,6 +283,8 @@ class HarnessCliTest(unittest.TestCase):
             self.assertTrue((cwd / ".harness" / "project" / "index.md").exists())
             self.assertTrue((cwd / "AGENTS.md").exists())
             self.assertIn("Split Session Requests", (cwd / ".harness" / "agents" / "common.md").read_text())
+            self.assertIn("Child story/session ids are traceability artifacts by default", (cwd / ".harness" / "agents" / "common.md").read_text())
+            self.assertIn("use subagents only when stories can be planned independently", (cwd / "AGENTS.md").read_text())
             self.assertIn("child-session planning", (cwd / "AGENTS.md").read_text())
             self.assertIn(".env", (cwd / ".gitignore").read_text().splitlines())
             self.assertEqual(self.harness_module.HARNESS_VERSION, (cwd / ".harness" / "version").read_text().strip())
@@ -345,6 +347,8 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn('session_id: "story-001"', story_plan_text)
             self.assertIn('planning_approved: "false"', story_plan_text)
             self.assertIn('parent_session_id: "epic-approval"', story_plan_text)
+            self.assertIn("## Subagent Planning Decision", story_plan_text)
+            self.assertIn("Decision: TBD", story_plan_text)
             story_html_text = story_html.read_text()
             self.assertIn("Session Metadata", story_html_text)
             self.assertIn("State: draft", story_html_text)
@@ -1525,6 +1529,7 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("harness start <session-id>", text)
             self.assertIn("harness validate <session-id>", text)
             self.assertIn("harness recover <session-id>", text)
+            self.assertIn("Child story/session ids are traceability artifacts by default", text)
 
     def test_sync_guardrails_aliases_update_with_deprecation_notice(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1560,8 +1565,12 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("harness list", common_text)
             self.assertIn("choose a short kebab-case session id", common_text)
             self.assertIn("harness start <session-id>", common_text)
+            self.assertIn("Child story/session ids are traceability artifacts by default", common_text)
+            self.assertIn("Pros of subagent child planning", common_text)
+            self.assertIn("Cons of subagent child planning", common_text)
             planning_text = (cwd / ".harness" / "agents" / "planning.md").read_text()
             self.assertIn("Read `.harness/project/index.md`", planning_text)
+            self.assertIn("Decide whether split/child-session planning needs subagents", planning_text)
             self.assertIn("lower-capability implementation agent", planning_text)
             self.assertIn("Old Flow", planning_text)
             self.assertIn("New Flow", planning_text)
