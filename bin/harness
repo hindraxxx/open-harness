@@ -17,7 +17,7 @@ from pathlib import Path
 
 
 MAX_RECOVERY_ATTEMPTS = 3
-HARNESS_VERSION = "2026.06.24.2"
+HARNESS_VERSION = "2026.06.24.3"
 
 LANGUAGE_SKILLS = [
     {"name": "java-springboot", "url": "https://raw.githubusercontent.com/github/awesome-copilot/main/skills/java-springboot/SKILL.md"},
@@ -979,6 +979,15 @@ def update_harness_source(source: Path) -> bool:
     return True
 
 
+def is_harness_owned_path(path: str) -> bool:
+    return (
+        path.startswith(".harness/")
+        or path == ".agents/"
+        or path.startswith(".agents/skills/")
+        or path in {"AGENTS.md", ".env.example", ".gitignore"}
+    )
+
+
 def non_harness_changes() -> list[str]:
     try:
         result = subprocess.run(
@@ -993,13 +1002,12 @@ def non_harness_changes() -> list[str]:
         result = None
     if result is None or result.returncode != 0:
         changes = []
-        ignored_dirs = {".git", ".harness", "__pycache__"}
-        ignored_files = {"AGENTS.md", ".env.example", ".gitignore"}
+        ignored_dirs = {".git", "__pycache__"}
         for path in root().rglob("*"):
             if not path.is_file():
                 continue
             rel = path.relative_to(root()).as_posix()
-            if rel in ignored_files:
+            if is_harness_owned_path(rel):
                 continue
             if any(part in ignored_dirs for part in path.relative_to(root()).parts):
                 continue
@@ -1012,7 +1020,7 @@ def non_harness_changes() -> list[str]:
             path = path.split(" -> ", 1)[1]
         if not path:
             continue
-        if path.startswith(".harness/") or path in {"AGENTS.md", ".env.example", ".gitignore"}:
+        if is_harness_owned_path(path):
             continue
         changes.append(path)
     return changes
@@ -1067,16 +1075,28 @@ def dump_frontmatter(data: dict[str, str], body: str) -> str:
 
 def render_inline_markdown(value: str) -> str:
     escaped = html.escape(value)
-    with_code = re.sub(
-        r"`([^`]+)`",
-        lambda match: f"<code>{match.group(1)}</code>",
-        escaped,
-    )
-    return re.sub(
-        r"\[([^\]]+)\]\(([^)]+)\)",
-        lambda match: f'<a href="{html.escape(match.group(2), quote=True)}">{match.group(1)}</a>',
-        with_code,
-    )
+
+    def render_text(text: str) -> str:
+        with_links = re.sub(
+            r"\[([^\]]+)\]\(([^)]+)\)",
+            lambda match: f'<a href="{html.escape(match.group(2), quote=True)}">{match.group(1)}</a>',
+            text,
+        )
+        return re.sub(
+            r"\*\*([^*\n]+)\*\*",
+            lambda match: f"<strong>{match.group(1)}</strong>",
+            with_links,
+        )
+
+    parts = re.split(r"(`[^`]+`)", escaped)
+    rendered = []
+    for part in parts:
+        code = re.fullmatch(r"`([^`]+)`", part)
+        if code:
+            rendered.append(f"<code>{code.group(1)}</code>")
+        else:
+            rendered.append(render_text(part))
+    return "".join(rendered)
 
 
 def render_markdown_table(lines: list[str]) -> str:
@@ -2381,11 +2401,11 @@ def sync_target_guardrails_if_outdated() -> None:
     if target_guardrails_outdated():
         print_synced_guardrails(overwrite_guardrails())
         print("target guardrails synced")
+        installed = install_language_skills(force=True)
+        if installed:
+            print(f"installed/refreshed language skills: {', '.join(installed)}")
     else:
         print("target guardrails current")
-    installed = install_language_skills(force=True)
-    if installed:
-        print(f"installed/refreshed language skills: {', '.join(installed)}")
 
 
 def cmd_update(args: argparse.Namespace) -> None:

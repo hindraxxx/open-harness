@@ -297,6 +297,8 @@ class HarnessCliTest(unittest.TestCase):
                             "## Requirement Summary",
                             "",
                             "Review <script>alert('x')</script> safely.",
+                            "- **Primary target**: `src/main/kotlin/ProfileServiceV2.kt:250-330`",
+                            "- Literal code keeps markers: `**not bold**`",
                             "",
                             "1. In `web/src/UserController.java`, add `requestId`.",
                             "2. In `UserConsentService.java`, pass `requestId` through.",
@@ -334,6 +336,8 @@ class HarnessCliTest(unittest.TestCase):
             html_text = html_artifact.read_text()
             self.assertIn("Review &lt;script&gt;alert(&#x27;x&#x27;)&lt;/script&gt; safely.", html_text)
             self.assertNotIn("<script>alert", html_text)
+            self.assertIn("<li><strong>Primary target</strong>: <code>src/main/kotlin/ProfileServiceV2.kt:250-330</code></li>", html_text)
+            self.assertIn("<li>Literal code keeps markers: <code>**not bold**</code></li>", html_text)
             self.assertIn("<ol><li>In <code>web/src/UserController.java</code>, add <code>requestId</code>.</li>", html_text)
             self.assertIn("<li>In <code>UserConsentService.java</code>, pass <code>requestId</code> through.</li></ol>", html_text)
             self.assertIn("width: min(1380px, calc(100% - 40px));", html_text)
@@ -466,6 +470,28 @@ class HarnessCliTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("non-harness changes already exist before implementation gate", result.stdout)
             self.assertNotIn("Implementation Checklist has unchecked items", result.stdout)
+
+    def test_planning_to_implementation_allows_harness_generated_sync_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            self.git(cwd, "init", "-b", "main")
+            self.git(cwd, "config", "user.email", "test@example.com")
+            self.git(cwd, "config", "user.name", "Harness Test")
+            self.run_cli(cwd, "start", "req-login-timeout")
+            artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
+            text = artifact.read_text()
+            text = text.replace("TBD", "Download Neraca as Excel", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Acceptance exists", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Validation exists", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Implementation task", 1)
+            artifact.write_text(self.with_guidance(text))
+
+            self.run_cli(cwd, "transition", "req-login-timeout", "planning")
+            self.run_cli(cwd, "approve-planning", "req-login-timeout", "--by", "Liem")
+            result = self.run_cli(cwd, "transition", "req-login-timeout", "implementation")
+
+            self.assertIn("transitioned: planning -> implementation", result.stdout)
 
     def test_approve_planning_defaults_to_whoami(self):
         with tempfile.TemporaryDirectory() as tmp:
