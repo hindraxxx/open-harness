@@ -8,9 +8,8 @@ Before implementation:
 2. Read `### Old Flow` to understand the current end-to-end request/data path as it exists today.
 3. Read `### New Flow` to understand the target end-to-end request/data path, branch behavior, and expected side effects after changes.
 4. Follow the `### Implementation Sketch` as the starting code plan.
-5. Use `### Decision Flow` as the source of truth for branch behavior.
-6. Use `### Code Anchors` for the exact existing variables, conditions, helpers, and call sites to modify or preserve.
-7. If the diagrams, sketch, or code anchors are missing, ambiguous, or conflict with current code, stop and return to planning instead of re-planning silently.
+5. Use `### Code Anchors` for the exact existing variables, conditions, helpers, and call sites to modify or preserve.
+6. If the diagrams, sketch, or code anchors are missing, ambiguous, or conflict with current code, stop and return to planning instead of re-planning silently.
 
 Before editing product code, run:
 

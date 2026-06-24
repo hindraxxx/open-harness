@@ -22,13 +22,14 @@ Exit only after human approval:
 
 ```bash
 harness validate <session-id>
-harness approve-planning <session-id> --by <human-name>
+harness approve-planning <session-id>
 harness transition <session-id> implementation
 ```
 
 `harness validate <session-id>` must show no missing planning fields before asking for human approval.
 
 Agents must not run `approve-planning` unless the user explicitly instructs them to approve planning.
+`approve-planning` uses `whoami` for the approver name by default; pass `--by <human-name>` only to override it.
 
 Before filling the session artifact:
 
@@ -50,7 +51,6 @@ Planning must include real checklist items in:
 - a mandatory `### Old Flow` subsection containing a Mermaid `sequenceDiagram` that shows the end-to-end request/data flow as it currently exists in the codebase across all relevant layers (client, controller, application/domain service, repository/infrastructure, database, and external calls); label participants with exact existing files, classes, modules, or call sites discovered during exploration, for example `ReportController.php`, `ReportService`, `ReportRepository`, or `PaymentGatewayClient`; for greenfield or new-feature work, diagram the surrounding integration boundary as it exists today — the existing systems, controllers, providers, and their interactions that the new feature will plug into
 - a mandatory `### New Flow` subsection containing a Mermaid `sequenceDiagram` that shows the end-to-end request/data flow after the planned changes, with `alt`/`else` branches to distinguish scoped behavior changes from preserved existing behavior; label participants with exact existing files, classes, modules, or call sites where they overlap with the old flow
 - a mandatory `### Implementation Sketch` subsection containing all pseudocode, sample function shapes, and concrete code-shape steps the implementation agent can follow directly
-- a mandatory `### Decision Flow` subsection containing a Mermaid flowchart that maps each important branch/input state to the expected behavior, metric, return value, or side effect
 - a mandatory `### Code Anchors` subsection naming the exact existing variables, conditions, helper functions, or call sites the implementation must use for key decisions
 - invariants and out-of-scope areas that must not be changed
 - concrete data cases or examples the implementer should verify

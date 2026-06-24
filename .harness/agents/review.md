@@ -46,14 +46,17 @@ Required fixes go through:
 harness recover <session-id> --reason "open review item: <summary>"
 ```
 
+Recovery clears prior review approval and resets `## Review > Human Review` to `TBD`.
+
 Quality-check requires explicit human approval:
 
 ```bash
-harness approve-review <session-id> --by <human-name>
+harness approve-review <session-id>
 harness transition <session-id> quality-check
 ```
 
 Agents must not run `approve-review` unless the user explicitly instructs them to approve review.
+`approve-review` uses `whoami` for the approver name by default; pass `--by <human-name>` only to override it.
 
 Before quality-check:
 
