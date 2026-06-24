@@ -12,11 +12,19 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import urllib.request
 from pathlib import Path
 
 
 MAX_RECOVERY_ATTEMPTS = 3
-HARNESS_VERSION = "2026.06.24.1"
+HARNESS_VERSION = "2026.06.24.2"
+
+LANGUAGE_SKILLS = [
+    {"name": "java-springboot", "url": "https://raw.githubusercontent.com/github/awesome-copilot/main/skills/java-springboot/SKILL.md"},
+    {"name": "kotlin-springboot", "url": "https://raw.githubusercontent.com/github/awesome-copilot/main/skills/kotlin-springboot/SKILL.md"},
+    {"name": "php-pro", "url": "https://raw.githubusercontent.com/jeffallan/claude-skills/main/skills/php-pro/SKILL.md"},
+    {"name": "typescript-pro", "url": "https://raw.githubusercontent.com/jeffallan/claude-skills/main/skills/typescript-pro/SKILL.md"},
+]
 STATES = ["start", "planning", "implementation", "review", "needs-fix", "quality-check", "approval", "blocked", "done"]
 TRANSITIONS = {
     "start": {"planning"},
@@ -2278,6 +2286,36 @@ def validate_planning_approval(session_id: str) -> list[str]:
     return []
 
 
+def skills_dir() -> Path:
+    return root() / ".agents" / "skills"
+
+
+def install_language_skills(force: bool = False) -> list[str]:
+    installed = []
+    existing = set()
+    sd = skills_dir()
+    if sd.exists():
+        for entry in sd.iterdir():
+            if entry.is_dir() and (entry / "SKILL.md").exists():
+                existing.add(entry.name)
+    for spec in LANGUAGE_SKILLS:
+        name = spec["name"]
+        if not force and name in existing:
+            continue
+        skill_dir = sd / name
+        skill_file = skill_dir / "SKILL.md"
+        try:
+            with urllib.request.urlopen(spec["url"], timeout=30) as resp:
+                content = resp.read().decode("utf-8")
+        except OSError as exc:
+            print(f"warning: failed to fetch skill {name}: {exc}", file=sys.stderr)
+            continue
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        skill_file.write_text(content)
+        installed.append(name)
+    return installed
+
+
 def cmd_init(_args: argparse.Namespace) -> None:
     harness_dir().mkdir(exist_ok=True)
     sessions_dir().mkdir(parents=True, exist_ok=True)
@@ -2295,6 +2333,9 @@ def cmd_init(_args: argparse.Namespace) -> None:
     write_project_map(overwrite=False)
     ensure_gitignore()
     print("initialized harness")
+    installed = install_language_skills()
+    if installed:
+        print(f"installed language skills: {', '.join(installed)}")
 
 
 def print_project_map_result(message: str, written: list[Path]) -> None:
@@ -2327,6 +2368,9 @@ def cmd_sync_guardrails(args: argparse.Namespace) -> None:
     if not args.force:
         die(f"sync-guardrails overwrites {agents_bootstrap_path().name} and .harness/agents/*.md; rerun with --force")
     print_synced_guardrails(overwrite_guardrails())
+    installed = install_language_skills(force=True)
+    if installed:
+        print(f"installed/refreshed language skills: {', '.join(installed)}")
 
 
 def cmd_upgrade_guardrails(_args: argparse.Namespace) -> None:
@@ -2339,6 +2383,9 @@ def sync_target_guardrails_if_outdated() -> None:
         print("target guardrails synced")
     else:
         print("target guardrails current")
+    installed = install_language_skills(force=True)
+    if installed:
+        print(f"installed/refreshed language skills: {', '.join(installed)}")
 
 
 def cmd_update(args: argparse.Namespace) -> None:
