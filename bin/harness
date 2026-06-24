@@ -17,7 +17,7 @@ from pathlib import Path
 
 
 MAX_RECOVERY_ATTEMPTS = 3
-HARNESS_VERSION = "2026.06.24.7"
+HARNESS_VERSION = "2026.06.24.8"
 
 LANGUAGE_SKILLS = [
     {"name": "java-springboot", "url": "https://raw.githubusercontent.com/github/awesome-copilot/main/skills/java-springboot/SKILL.md"},
@@ -1398,7 +1398,8 @@ th, td {{
   padding: 9px 11px;
   text-align: left;
   vertical-align: top;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: normal;
 }}
 tr:last-child th, tr:last-child td {{ border-bottom: 0; }}
 th {{
@@ -1407,7 +1408,6 @@ th {{
   font-size: 0.78rem;
   letter-spacing: 0.02em;
   text-transform: uppercase;
-  width: 32%;
 }}
 .shell {{
   display: grid;
@@ -1686,7 +1686,7 @@ th, td {{
   padding: 9px 11px;
   text-align: left;
   vertical-align: top;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   word-break: normal;
 }}
 tr:last-child th, tr:last-child td {{ border-bottom: 0; }}
@@ -1696,7 +1696,6 @@ th {{
   font-size: 0.78rem;
   letter-spacing: 0.02em;
   text-transform: uppercase;
-  width: 34%;
 }}
 .content {{
   background: rgba(255, 255, 255, 0.76);
@@ -1740,6 +1739,7 @@ th {{
 }}
 .meta {{ margin: 0; font-size: 0.85rem; }}
 .meta th, .meta td {{ padding: 7px 8px; }}
+.meta th {{ width: 34%; }}
 .meta th {{ overflow-wrap: normal; word-break: normal; }}
 .meta td {{ overflow-wrap: anywhere; word-break: normal; }}
 .check {{

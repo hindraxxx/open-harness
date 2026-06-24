@@ -488,6 +488,10 @@ class HarnessCliTest(unittest.TestCase):
                             "1. In `web/src/UserController.java`, add `requestId`.",
                             "2. In `UserConsentService.java`, pass `requestId` through.",
                             "",
+                            "| RFC Ref | Task | SP | PIC |",
+                            "| --- | --- | --- | --- |",
+                            "| 1.1 / 1.1.1 | Assign users to treatment group | 1 | Rizal Ferdian |",
+                            "",
                             "```python",
                             "print('<safe>')",
                             "```",
@@ -527,7 +531,10 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("<li>In <code>UserConsentService.java</code>, pass <code>requestId</code> through.</li></ol>", html_text)
             self.assertIn("width: min(1380px, calc(100% - 40px));", html_text)
             self.assertIn("grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);", html_text)
+            self.assertIn("overflow-wrap: break-word;", html_text)
             self.assertIn("overflow-wrap: anywhere;", html_text)
+            self.assertIn(".meta th { width: 34%; }", html_text)
+            self.assertIn("<td>Rizal Ferdian</td>", html_text)
             self.assertIn(".meta, .meta tbody, .meta tr, .meta th, .meta td { display: block; width: 100%; }", html_text)
             self.assertIn('<code class="language-python">print(&#x27;&lt;safe&gt;&#x27;)</code>', html_text)
             self.assertIn('<code class="language-python">print(&#x27;tilde&#x27;)</code>', html_text)
