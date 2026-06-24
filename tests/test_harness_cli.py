@@ -341,7 +341,17 @@ class HarnessCliTest(unittest.TestCase):
             metadata_path = epic / "children" / "story-001" / "metadata.json"
             self.assertTrue(story_plan.exists())
             self.assertTrue(story_html.exists())
+            story_plan_text = story_plan.read_text()
+            self.assertIn('session_id: "story-001"', story_plan_text)
+            self.assertIn('planning_approved: "false"', story_plan_text)
+            self.assertIn('parent_session_id: "epic-approval"', story_plan_text)
+            story_html_text = story_html.read_text()
+            self.assertIn("Session Metadata", story_html_text)
+            self.assertIn("State: draft", story_html_text)
+            self.assertIn("GMT+7", story_html_text)
+            self.assertNotIn("<p>---</p>", story_html_text)
             metadata = json.loads(metadata_path.read_text())
+            self.assertEqual("story-001", metadata["session_id"])
             self.assertEqual("epic-approval", metadata["epic_id"])
             self.assertEqual("story-001", metadata["story_id"])
             self.assertEqual("Maker submits request", metadata["title"])
@@ -529,8 +539,11 @@ class HarnessCliTest(unittest.TestCase):
             self.run_cli(cwd, "start", "req-login-timeout")
             artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
             html_artifact = artifact.with_suffix(".html")
+            metadata, body = self.harness_module.parse_frontmatter(artifact.read_text())
+            metadata["created_at"] = "2026-06-24T11:30:16+00:00"
+            metadata["updated_at"] = "2026-06-24T11:41:43+00:00"
             artifact.write_text(
-                artifact.read_text().replace(
+                self.harness_module.dump_frontmatter(metadata, body).replace(
                     "## Requirement Summary\n\nTBD",
                     "\n".join(
                         [
@@ -579,6 +592,9 @@ class HarnessCliTest(unittest.TestCase):
 
             self.assertIn(f"HTML artifact: {html_artifact.resolve()}", result.stdout)
             html_text = html_artifact.read_text()
+            self.assertIn("Wednesday, 24 June 2026 18:30:16 GMT+7", html_text)
+            self.assertIn("Wednesday, 24 June 2026 18:41:43 GMT+7", html_text)
+            self.assertNotIn("2026-06-24T11:30:16+00:00", html_text)
             self.assertIn("Review &lt;script&gt;alert(&#x27;x&#x27;)&lt;/script&gt; safely.", html_text)
             self.assertNotIn("<script>alert", html_text)
             self.assertIn("<li><strong>Primary target</strong>: <code>src/main/kotlin/ProfileServiceV2.kt:250-330</code></li>", html_text)

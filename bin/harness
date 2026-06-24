@@ -17,7 +17,7 @@ from pathlib import Path
 
 
 MAX_RECOVERY_ATTEMPTS = 3
-HARNESS_VERSION = "2026.06.24.10"
+HARNESS_VERSION = "2026.06.24.11"
 
 LANGUAGE_SKILLS = [
     {"name": "java-springboot", "url": "https://raw.githubusercontent.com/github/awesome-copilot/main/skills/java-springboot/SKILL.md"},
@@ -124,6 +124,29 @@ def version_path() -> Path:
 
 def now() -> str:
     return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
+
+
+JAKARTA_TZ = dt.timezone(dt.timedelta(hours=7), "GMT+7")
+
+
+def format_display_timestamp(value: str) -> str:
+    raw = value.strip()
+    if not raw:
+        return raw
+    try:
+        parsed = dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return value
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt.timezone.utc)
+    local = parsed.astimezone(JAKARTA_TZ)
+    return f"{local:%A, %d %B %Y %H:%M:%S} GMT+7"
+
+
+def display_metadata_value(key: str, value: str) -> str:
+    if key.endswith("_at"):
+        return format_display_timestamp(value)
+    return value
 
 
 def die(message: str, code: int = 1) -> None:
@@ -1312,8 +1335,13 @@ def render_markdown_document(
     title: str,
     eyebrow: str,
     metadata: dict[str, str] | None = None,
+    metadata_heading: str = "Metadata",
 ) -> Path:
-    return render_markdown_content_document(read_text(md_path), html_path, title, eyebrow, metadata)
+    document_metadata, body = parse_frontmatter(read_text(md_path))
+    merged_metadata = dict(document_metadata)
+    if metadata:
+        merged_metadata.update(metadata)
+    return render_markdown_content_document(body, html_path, title, eyebrow, merged_metadata, metadata_heading)
 
 
 def render_markdown_content_document(
@@ -1322,21 +1350,30 @@ def render_markdown_content_document(
     title: str,
     eyebrow: str,
     metadata: dict[str, str] | None = None,
+    metadata_heading: str = "Metadata",
 ) -> Path:
     meta_rows = ""
     if metadata:
         meta_rows = "".join(
-            f"<tr><th>{html.escape(key)}</th><td>{html.escape(value)}</td></tr>"
+            f"<tr><th>{html.escape(key)}</th><td>{html.escape(display_metadata_value(key, value))}</td></tr>"
             for key, value in metadata.items()
         )
     aside = ""
     if meta_rows:
         aside = f"""
 <aside class="meta-card">
-<h2>Metadata</h2>
+<h2>{html.escape(metadata_heading)}</h2>
 <table class="meta">{meta_rows}</table>
 </aside>
 """
+    status_line = ""
+    if metadata:
+        status = metadata.get("status", "")
+        updated_at = display_metadata_value("updated_at", metadata.get("updated_at", ""))
+        if status or updated_at:
+            status_pill = f'<span class="pill">State: {html.escape(status)}</span>' if status else ""
+            updated_text = f"<span>Updated: {html.escape(updated_at)}</span>" if updated_at else ""
+            status_line = f'<div class="status-line">{status_pill}{updated_text}</div>'
     document = f"""<!doctype html>
 <html lang="en">
 <head>
@@ -1464,6 +1501,24 @@ th {{
   padding: 0;
   text-transform: uppercase;
 }}
+.status-line {{
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+  color: var(--muted);
+  flex-wrap: wrap;
+}}
+.pill {{
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(23, 109, 115, 0.22);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: #0d555a;
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 5px 10px;
+}}
 .meta {{ margin: 0; font-size: 0.85rem; }}
 .meta th, .meta td {{ padding: 7px 8px; }}
 .check {{
@@ -1484,6 +1539,7 @@ th {{
 <section class="hero">
 <p class="eyebrow">{html.escape(eyebrow)}</p>
 <h1>{html.escape(title)}</h1>
+{status_line}
 </section>
 <div class="shell">
 <article class="content">
@@ -1507,9 +1563,9 @@ def render_artifact_html(session_id: str) -> Path | None:
     metadata, body = parse_frontmatter(read_text(md_path))
     title = metadata.get("session_id") or session_id
     status = metadata.get("status", "unknown")
-    updated_at = metadata.get("updated_at", "")
+    updated_at = display_metadata_value("updated_at", metadata.get("updated_at", ""))
     meta_rows = "".join(
-        f"<tr><th>{html.escape(key)}</th><td>{html.escape(value)}</td></tr>"
+        f"<tr><th>{html.escape(key)}</th><td>{html.escape(display_metadata_value(key, value))}</td></tr>"
         for key, value in metadata.items()
     )
     document = f"""<!doctype html>
@@ -2782,8 +2838,12 @@ TBD
 """
 
 
-def default_story_plan(epic_id: str, story: dict[str, str], mode: str) -> str:
-    return f"""# Story Plan: {story['story_id']}
+def stringify_metadata(metadata: dict[str, object]) -> dict[str, str]:
+    return {key: str(value) for key, value in metadata.items() if key != "dependencies"}
+
+
+def default_story_plan(epic_id: str, story: dict[str, str], mode: str, metadata: dict[str, object]) -> str:
+    body = f"""# Story Plan: {story['story_id']}
 
 ## Source Epic
 
@@ -2821,17 +2881,34 @@ TBD
 
 - [ ] TBD
 """
+    return dump_frontmatter(stringify_metadata(metadata), body)
 
 
 def story_metadata(epic_id: str, story: dict[str, str], index: int) -> dict[str, object]:
+    timestamp = now()
     return {
+        "session_id": story["story_id"],
+        "status": "draft",
+        "planning_approved": "false",
+        "planning_approved_by": "",
+        "planning_approved_at": "",
+        "planning_approved_hash": "",
+        "review_approved": "false",
+        "review_approved_by": "",
+        "review_approved_at": "",
+        "quality_approved": "false",
+        "quality_approved_by": "",
+        "quality_approved_at": "",
+        "recovery_attempts": "0",
+        "created_at": timestamp,
+        "updated_at": timestamp,
+        "parent_session_id": epic_id,
         "epic_id": epic_id,
         "story_id": story["story_id"],
         "title": story["title"],
         "planning_session_id": "",
         "plan_md": f"children/{story['story_id']}/plan.md",
         "plan_html": f"children/{story['story_id']}/plan.html",
-        "status": "draft",
         "dependencies": [],
         "implementation_order": index,
     }
@@ -2871,13 +2948,14 @@ def metadata_by_story_id(story_id: str) -> dict[str, object] | None:
 
 
 def render_story_plan(epic_id: str, story: dict[str, str], metadata: dict[str, object]) -> Path:
-    string_metadata = {key: str(value) for key, value in metadata.items() if key != "dependencies"}
+    string_metadata = stringify_metadata(metadata)
     return render_markdown_document(
         story_plan_path(epic_id, story["story_id"]),
         story_plan_html_path(epic_id, story["story_id"]),
         f"Story Plan: {story['story_id']}",
         "Harness Story Plan",
         string_metadata,
+        "Session Metadata",
     )
 
 
@@ -2927,7 +3005,7 @@ def write_story_artifacts(epic_id: str, stories: list[dict[str, str]], mode: str
             die(f"story already exists: {story['story_id']}; rerun with --force to overwrite child artifacts")
         metadata = story_metadata(epic_id, story, index)
         plan_path.parent.mkdir(parents=True, exist_ok=True)
-        plan_path.write_text(default_story_plan(epic_id, story, mode))
+        plan_path.write_text(default_story_plan(epic_id, story, mode, metadata))
         write_json(metadata_path, metadata)
         render_story_plan(epic_id, story, metadata)
 
