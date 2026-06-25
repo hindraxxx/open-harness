@@ -16,6 +16,7 @@ from typing import Optional
 
 ROOT = Path(__file__).resolve().parents[1]
 CLI = ROOT / "bin" / "harness"
+INSTALLER = ROOT / "install.sh"
 
 
 class HarnessCliTest(unittest.TestCase):
@@ -128,6 +129,21 @@ class HarnessCliTest(unittest.TestCase):
         self.git(seed, "commit", "-m", "advance")
         self.git(seed, "push", "origin", "main")
         return source, source / "bin" / "harness"
+
+    def make_installer_source_fixture(self, tmp: Path) -> Path:
+        source = tmp / "installer-source"
+        (source / "bin").mkdir(parents=True)
+        shutil.copy2(CLI, source / "bin" / "harness")
+        shutil.copy2(INSTALLER, source / "install.sh")
+        os.chmod(source / "bin" / "harness", 0o755)
+        os.chmod(source / "install.sh", 0o755)
+        (source / "README.md").write_text("installer fixture\n")
+        self.git(source, "init", "-b", "main")
+        self.git(source, "config", "user.email", "test@example.com")
+        self.git(source, "config", "user.name", "Harness Test")
+        self.git(source, "add", ".")
+        self.git(source, "commit", "-m", "initial")
+        return source
 
     def guidance_placeholder(self) -> str:
         return (
@@ -2051,6 +2067,48 @@ class HarnessCliTest(unittest.TestCase):
             with sqlite3.connect(cwd / ".harness" / "harness.db") as conn:
                 row = conn.execute("SELECT path FROM proofs WHERE session_id = ?", ("req-login-timeout",)).fetchone()
             self.assertTrue(row[0].endswith("proof/result.txt"))
+
+    def test_install_script_clones_and_symlinks_harness(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            source = self.make_installer_source_fixture(tmp)
+            home = tmp / "home"
+            install_dir = home / ".workflow-project"
+            bin_dir = home / ".local" / "bin"
+            env = os.environ.copy()
+            env["HOME"] = str(home)
+            env["HARNESS_REPO_URL"] = str(source)
+            env["HARNESS_INSTALL_DIR"] = str(install_dir)
+            env["HARNESS_BIN_DIR"] = str(bin_dir)
+            result = subprocess.run(
+                ["bash", str(INSTALLER)],
+                cwd=tmp,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+            )
+            if result.returncode != 0:
+                self.fail(f"install.sh failed\nstdout={result.stdout}\nstderr={result.stderr}")
+
+            harness_link = bin_dir / "harness"
+            self.assertTrue((install_dir / ".git").exists())
+            self.assertTrue(harness_link.is_symlink())
+            self.assertEqual((install_dir / "bin" / "harness").resolve(), harness_link.resolve())
+            self.assertIn("Installed harness.", result.stdout)
+            self.assertIn("start your-session-id", result.stdout)
+
+            rerun = subprocess.run(
+                ["bash", str(INSTALLER)],
+                cwd=tmp,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+            )
+            if rerun.returncode != 0:
+                self.fail(f"install.sh rerun failed\nstdout={rerun.stdout}\nstderr={rerun.stderr}")
+            self.assertIn("updating existing harness source", rerun.stdout)
 
     def test_attach_proof_records_link_under_quality_check_proof(self):
         with tempfile.TemporaryDirectory() as tmp:

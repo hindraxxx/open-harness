@@ -4,23 +4,32 @@ Local CLI harness for agent-driven engineering workflows. It creates `.harness/`
 
 ## Install
 
-Clone this repo somewhere stable:
+Host `install.sh` from this GitHub repo and share one bootstrap command across the team:
 
 ```bash
-git clone <workflow-project-repo-url> ~/workflow-project
-chmod +x ~/workflow-project/bin/harness
+curl -fsSL https://raw.githubusercontent.com/hindraxxx/workflow-project/main/install.sh | bash
 ```
 
-Use it directly from any project:
+If your org prefers not to pipe into `bash`, use the safer two-step version:
 
 ```bash
-~/workflow-project/bin/harness init
+curl -fsSLo install.sh https://raw.githubusercontent.com/hindraxxx/workflow-project/main/install.sh
+bash install.sh
 ```
 
-Recommended: symlink it into your system path:
+The installer:
+
+- clones or updates the harness repo into `~/.workflow-project`
+- symlinks the CLI into `~/.local/bin/harness`
+- preserves the git checkout so `harness update` still works later
+
+Manual fallback if you do not want the installer:
 
 ```bash
-sudo ln -sf ~/workflow-project/bin/harness /usr/local/bin/harness
+git clone <workflow-project-repo-url> ~/.workflow-project
+chmod +x ~/.workflow-project/bin/harness
+mkdir -p ~/.local/bin
+ln -sf ~/.workflow-project/bin/harness ~/.local/bin/harness
 ```
 
 ## Start A Session
@@ -28,10 +37,11 @@ sudo ln -sf ~/workflow-project/bin/harness /usr/local/bin/harness
 From your target repo:
 
 ```bash
-harness init
 harness start user-consent-request-id
 harness status user-consent-request-id
 ```
+
+`harness start <session-id>` auto-initializes missing local harness files, so most users do not need to run `harness init` separately.
 
 Then tell your agent the session id:
 
