@@ -27,6 +27,7 @@ Before doing harness work:
 
 ## Split Session Requests
 
+- Proactively decide session structure during `planning`: if exploration shows two or more independently shippable units of behavior, run `harness split-session <session-id> --story ...` before filling the rest of the planning artifact. Use the criteria in the Planning State Guardrails. Do not wait for the user to ask for a split.
 - If the user asks to split the current session, work, plan, or analysis, treat "split" as child-session planning under the current parent session.
 - Use `harness split-session <parent-session-id> --story ...` while the parent is in `planning`; transition from `start` to `planning` first if needed.
 - Do not create a separate top-level session for a split request unless the user explicitly asks for an independent new session.

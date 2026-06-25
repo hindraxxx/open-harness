@@ -17,7 +17,7 @@ from pathlib import Path
 
 
 MAX_RECOVERY_ATTEMPTS = 3
-HARNESS_VERSION = "2026.06.24.12"
+HARNESS_VERSION = "2026.06.25.1"
 
 LANGUAGE_SKILLS = [
     {"name": "java-springboot", "url": "https://raw.githubusercontent.com/github/awesome-copilot/main/skills/java-springboot/SKILL.md"},
@@ -537,6 +537,7 @@ Before doing harness work:
 
 ## Split Session Requests
 
+- Proactively decide session structure during `planning`: if exploration shows two or more independently shippable units of behavior, run `harness split-session <session-id> --story ...` before filling the rest of the planning artifact. Use the criteria in the Planning State Guardrails. Do not wait for the user to ask for a split.
 - If the user asks to split the current session, work, plan, or analysis, treat "split" as child-session planning under the current parent session.
 - Use `harness split-session <parent-session-id> --story ...` while the parent is in `planning`; transition from `start` to `planning` first if needed.
 - Do not create a separate top-level session for a split request unless the user explicitly asks for an independent new session.
@@ -613,6 +614,28 @@ Before any code edit, transition to `planning`, complete planning, then transiti
         "planning.md": """# Planning State Guardrails
 
 Explore first. Ask blocking ambiguity questions. Write acceptance criteria, validation plan, implementation guidance, and implementation checklist.
+
+## Session Structure
+
+Decide whether this work is one session or multiple child sessions before filling the rest of the artifact. Do not decide by story count alone.
+
+Cluster the requirement into independent units of behavior. Each unit must be able to stand alone with its own Old Flow / New Flow sequence diagram, validation plan, and proof. A unit that only makes sense after another ships is a dependent story, not a separate session.
+
+Use child sessions (split) when the work decomposes into two or more units that:
+
+- have disjoint code surfaces (different endpoints, services, or screens with no shared edit surface that would cause merge conflicts if worked in parallel)
+- can each be validated with an independent proof and acceptance criteria
+- can be accepted or rejected independently
+
+Keep a single session when the work is one cohesive change:
+
+- one Old Flow / New Flow sequence diagram covers the end-to-end change cleanly
+- acceptance criteria and validation plan apply to the whole change together
+- splitting would produce sessions that cannot be understood or validated in isolation
+
+If you decide to split, run `harness split-session <session-id> --story <story-id>:<title> ...` while this session is in `planning`. Fill each child's `dependencies` from the natural ordering of the work. Do not split just because the change is large; split only when units are independently shippable.
+
+If you are unsure, keep a single session. A session can be split later if implementation reveals genuinely independent work.
 
 Allowed:
 
@@ -970,6 +993,7 @@ canonical rule set; this file is the entry checklist.
 1. Identify the session id from the user request, current artifact, or `harness list`.
    If no session exists yet, choose a short kebab-case session id that summarizes the request and create it with `harness start <session-id>` before continuing.
    If the user asks to split the current session/work/plan, treat "split" as a request for child-session planning under the current parent session. Use `harness split-session <parent-session-id> --story ...` in `planning` state instead of creating a separate top-level session, unless the user explicitly asks for an independent new session.
+   You must also decide session structure proactively during planning: if the work decomposes into two or more independently shippable units, run `harness split-session` before filling the rest of the planning artifact. Do not wait to be asked.
 2. Run `harness status <session-id>`.
 3. Read `.harness/agents/common.md`.
 4. Read `.harness/project/index.md` if present.
@@ -2813,14 +2837,10 @@ def parse_story_arg(raw: str, index: int) -> dict[str, str]:
     return {"story_id": story_id, "title": title}
 
 
-def planning_mode(story_count: int, force_single: bool, force_split: bool) -> str:
+def planning_mode(force_single: bool, force_split: bool) -> str:
     if force_single and force_split:
         die("choose only one of --single-session or --split-stories")
-    if force_single:
-        return "single-session"
     if force_split:
-        return "child-session"
-    if story_count >= 3:
         return "child-session"
     return "single-session"
 
@@ -3058,7 +3078,7 @@ def cmd_plan_epic(args: argparse.Namespace) -> None:
     story_ids = [story["story_id"] for story in stories]
     if len(story_ids) != len(set(story_ids)):
         die("duplicate story id in --story arguments")
-    mode = planning_mode(len(stories), args.single_session, args.split_stories)
+    mode = planning_mode(args.single_session, args.split_stories)
     base = epic_dir(args.epic_id)
     if base.exists() and not args.force:
         die(f"epic already exists: {args.epic_id}; rerun with --force to overwrite planning artifacts")
