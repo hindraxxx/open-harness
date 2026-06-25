@@ -300,6 +300,7 @@ class HarnessCliTest(unittest.TestCase):
             self.assertTrue((cwd / "AGENTS.md").exists())
             self.assertIn("Split Session Requests", (cwd / ".harness" / "agents" / "common.md").read_text())
             self.assertIn("child-session planning", (cwd / "AGENTS.md").read_text())
+            self.assertIn("If `harness` is not available", (cwd / "AGENTS.md").read_text())
             self.assertIn(".env", (cwd / ".gitignore").read_text().splitlines())
             self.assertEqual(self.harness_module.HARNESS_VERSION, (cwd / ".harness" / "version").read_text().strip())
             self.assertIn(f"harness version: none -> {self.harness_module.HARNESS_VERSION}", result.stdout)

@@ -17,7 +17,7 @@ from pathlib import Path
 
 
 MAX_RECOVERY_ATTEMPTS = 3
-HARNESS_VERSION = "2026.06.25.1"
+HARNESS_VERSION = "2026.06.25.2"
 
 LANGUAGE_SKILLS = [
     {"name": "java-springboot", "url": "https://raw.githubusercontent.com/github/awesome-copilot/main/skills/java-springboot/SKILL.md"},
@@ -989,22 +989,26 @@ def default_agents_bootstrap() -> str:
 For harness work, these rules are mandatory. `.harness/agents/common.md` is the
 canonical rule set; this file is the entry checklist.
 
-0. If unsure the setup is healthy, run `harness doctor`.
-1. Identify the session id from the user request, current artifact, or `harness list`.
+0. If `harness` is not available, install it from the trusted harness repo:
+   `curl -fsSL https://raw.githubusercontent.com/hindraxxx/workflow-project/main/install.sh | bash`
+   Then refresh the shell command cache with `hash -r` if available and continue.
+   If installation is blocked by network or machine policy, stop and report the blocker.
+1. If unsure the setup is healthy, run `harness doctor`.
+2. Identify the session id from the user request, current artifact, or `harness list`.
    If no session exists yet, choose a short kebab-case session id that summarizes the request and create it with `harness start <session-id>` before continuing.
    If the user asks to split the current session/work/plan, treat "split" as a request for child-session planning under the current parent session. Use `harness split-session <parent-session-id> --story ...` in `planning` state instead of creating a separate top-level session, unless the user explicitly asks for an independent new session.
    You must also decide session structure proactively during planning: if the work decomposes into two or more independently shippable units, run `harness split-session` before filling the rest of the planning artifact. Do not wait to be asked.
-2. Run `harness status <session-id>`.
-3. Read `.harness/agents/common.md`.
-4. Read `.harness/project/index.md` if present.
-5. Read the state-specific guardrail file printed by `harness status`.
-6. Follow the state guardrails strictly.
-7. Before editing product code, run `harness preflight-edit <session-id>`.
-8. Edit product code only when preflight exits 0.
-9. Run `harness validate <session-id>` before every transition, then use
+3. Run `harness status <session-id>`.
+4. Read `.harness/agents/common.md`.
+5. Read `.harness/project/index.md` if present.
+6. Read the state-specific guardrail file printed by `harness status`.
+7. Follow the state guardrails strictly.
+8. Before editing product code, run `harness preflight-edit <session-id>`.
+9. Edit product code only when preflight exits 0.
+10. Run `harness validate <session-id>` before every transition, then use
    `harness transition` for phase changes.
-10. Never bypass transition guards by editing artifact status manually.
-11. Never write `.env` secrets into artifacts, logs, comments, or proof files.
+11. Never bypass transition guards by editing artifact status manually.
+12. Never write `.env` secrets into artifacts, logs, comments, or proof files.
 
 Project map rule: `.harness/project/` is orientation only. Current code wins; verify relevant facts before planning or editing.
 
