@@ -23,16 +23,7 @@ The installer:
 - symlinks the CLI into `~/.local/bin/harness`
 - preserves the git checkout so `harness update` still works later
 
-Manual fallback if you do not want the installer:
-
-```bash
-git clone <workflow-project-repo-url> ~/.workflow-project
-chmod +x ~/.workflow-project/bin/harness
-mkdir -p ~/.local/bin
-ln -sf ~/.workflow-project/bin/harness ~/.local/bin/harness
-```
-
-## Start A Session
+## Sessions
 
 From your target repo:
 
@@ -42,14 +33,6 @@ harness status user-consent-request-id
 ```
 
 `harness start <session-id>` auto-initializes missing local harness files, so most users do not need to run `harness init` separately.
-
-Then tell your agent the session id:
-
-```text
-Use harness session user-consent-request-id.
-```
-
-If no session exists, the guardrails allow the agent to choose a short kebab-case session id and run `harness start <session-id>` itself.
 
 Useful commands:
 
@@ -76,11 +59,3 @@ harness update
 `harness start <session-id>` checks this version too. If local guardrails are outdated it prints a warning to run `harness update`, but it does not pull code or overwrite files during session start.
 
 - `harness sync-guardrails` remains as a deprecated compatibility alias for the local refresh part of `harness update`.
-
-## Test
-
-From this repo:
-
-```bash
-python3 tests/test_harness_cli.py
-```
