@@ -58,7 +58,7 @@ infer_repo_url_from_script() {
   return 1
 }
 
-repo_url="${HARNESS_REPO_URL:-https://github.com/hindraxxx/workflow-project.git}"
+repo_url="${HARNESS_REPO_URL:-https://github.com/hindraxxx/open-harness.git}"
 ref="${HARNESS_REF:-main}"
 install_dir="${HARNESS_INSTALL_DIR:-$HOME/.workflow-project}"
 bin_dir="${HARNESS_BIN_DIR:-$HOME/.local/bin}"

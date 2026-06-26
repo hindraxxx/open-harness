@@ -7,13 +7,13 @@ Local CLI harness for agent-driven engineering workflows. It creates `.harness/`
 Host `install.sh` from this GitHub repo and share one bootstrap command across the team:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hindraxxx/workflow-project/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/hindraxxx/open-harness/main/install.sh | bash
 ```
 
 If your org prefers not to pipe into `bash`, use the safer two-step version:
 
 ```bash
-curl -fsSLo install.sh https://raw.githubusercontent.com/hindraxxx/workflow-project/main/install.sh
+curl -fsSLo install.sh https://raw.githubusercontent.com/hindraxxx/open-harness/main/install.sh
 bash install.sh
 ```
 
@@ -54,7 +54,7 @@ From a target repo that already uses harness, update the installed harness sourc
 harness update
 ```
 
-`harness update` pulls the `workflow-project` repo behind the running `bin/harness`, then refreshes the target repo's guardrails and records the current CLI version in `.harness/version`.
+`harness update` pulls the `open-harness` repo behind the running `bin/harness`, then refreshes the target repo's guardrails and records the current CLI version in `.harness/version`.
 
 `harness start <session-id>` checks this version too. If local guardrails are outdated it prints a warning to run `harness update`, but it does not pull code or overwrite files during session start.
 

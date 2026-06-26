@@ -4,7 +4,7 @@ For harness work, these rules are mandatory. `.harness/agents/common.md` is the
 canonical rule set; this file is the entry checklist.
 
 0. If `harness` is not available, install it from the trusted harness repo:
-   `curl -fsSL https://raw.githubusercontent.com/hindraxxx/workflow-project/main/install.sh | bash`
+   `curl -fsSL https://raw.githubusercontent.com/hindraxxx/open-harness/main/install.sh | bash`
    Then refresh the shell command cache with `hash -r` if available and continue.
    If installation is blocked by network or machine policy, stop and report the blocker.
 1. If unsure the setup is healthy, run `harness doctor`.
