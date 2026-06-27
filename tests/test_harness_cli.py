@@ -674,6 +674,41 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn('modalBody.replaceChildren(diagram.cloneNode(true));', html_text)
             self.assertIn("mermaid.initialize", html_text)
 
+    def test_next_reports_start_transition_command(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            result = self.run_cli(cwd, "start", "req-login-timeout")
+            created_line = next(line for line in result.stdout.splitlines() if line.startswith("created session: "))
+            session_id = created_line.removeprefix("created session: ")
+
+            result = self.run_cli(cwd, "next", session_id)
+
+            self.assertIn(f"Session: {session_id}", result.stdout)
+            self.assertIn("State: start", result.stdout)
+            self.assertIn("Next action: transition to planning", result.stdout)
+            self.assertIn("Blocked by: none", result.stdout)
+            self.assertIn(f"- harness validate {session_id}", result.stdout)
+            self.assertIn(f"- harness transition {session_id} planning", result.stdout)
+
+    def test_next_reports_planning_blockers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            start = self.run_cli(cwd, "start", "req-login-timeout")
+            created_line = next(line for line in start.stdout.splitlines() if line.startswith("created session: "))
+            session_id = created_line.removeprefix("created session: ")
+            self.run_cli(cwd, "transition", session_id, "planning")
+
+            result = self.run_cli(cwd, "next", session_id)
+
+            self.assertIn("State: planning", result.stdout)
+            self.assertIn("Blocked by:", result.stdout)
+            self.assertIn("- Requirement Summary must be filled", result.stdout)
+            self.assertIn("- Acceptance Criteria must be filled", result.stdout)
+            self.assertIn("After resolving blockers, run:", result.stdout)
+            self.assertIn(f"- harness approve-planning {session_id}", result.stdout)
+
     def test_list_reports_no_sessions(self):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)

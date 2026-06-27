@@ -17,7 +17,7 @@ from pathlib import Path
 
 
 MAX_RECOVERY_ATTEMPTS = 3
-HARNESS_VERSION = "2026.06.27.1"
+HARNESS_VERSION = "2026.06.27.2"
 
 LANGUAGE_SKILLS = [
     {"name": "java-springboot", "url": "https://raw.githubusercontent.com/github/awesome-copilot/main/skills/java-springboot/SKILL.md"},
@@ -2636,6 +2636,51 @@ def next_action_for_state(state: str) -> str:
     }.get(state, "unknown")
 
 
+def next_followup_commands(session_id: str, state: str) -> list[str]:
+    return {
+        "start": [
+            f"harness validate {session_id}",
+            f"harness transition {session_id} planning",
+        ],
+        "planning": [
+            f"harness validate {session_id}",
+            f"harness approve-planning {session_id}",
+            f"harness transition {session_id} implementation",
+        ],
+        "implementation": [
+            f"harness preflight-edit {session_id}",
+            f"harness validate {session_id}",
+            f"harness transition {session_id} review",
+        ],
+        "needs-fix": [
+            f"harness preflight-edit {session_id}",
+            f"harness validate {session_id}",
+            f"harness transition {session_id} implementation",
+        ],
+        "review": [
+            f"harness record-review {session_id} --ai <summary>",
+            f"harness validate {session_id}",
+            f"harness approve-review {session_id}",
+            f"harness transition {session_id} quality-check",
+        ],
+        "quality-check": [
+            f"harness attach-proof {session_id} <file>",
+            f"harness validate {session_id}",
+            f"harness transition {session_id} approval",
+        ],
+        "approval": [
+            f"harness validate {session_id}",
+            f"harness approve-quality {session_id}",
+            f"harness transition {session_id} done",
+        ],
+        "blocked": [
+            f"harness history {session_id}",
+            f"harness transition {session_id} <state>",
+        ],
+        "done": [],
+    }.get(state, [])
+
+
 def quality_gate_mode() -> str:
     default = "auto"
     path = harness_dir() / "harness.yml"
@@ -3462,6 +3507,33 @@ def cmd_status(args: argparse.Namespace) -> None:
         print("Missing: none")
 
 
+def cmd_next(args: argparse.Namespace) -> None:
+    state = current_state(args.session_id)
+    missing = validate_requirements(args.session_id)
+    commands = next_followup_commands(args.session_id, state)
+    print(f"Session: {args.session_id}")
+    print(f"State: {state}")
+    print(f"Next action: {next_action_for_state(state)}")
+    print(f"Recovery attempts: {recovery_attempts(args.session_id)}/{MAX_RECOVERY_ATTEMPTS}")
+    if state in {"implementation", "needs-fix"}:
+        print("Edit gate: allowed")
+    else:
+        print(f"Edit gate: blocked in {state}")
+    if missing:
+        print("Blocked by:")
+        for item in missing:
+            print(f"- {item}")
+        print("After resolving blockers, run:")
+    else:
+        print("Blocked by: none")
+        print("Run:")
+    if commands:
+        for command in commands:
+            print(f"- {command}")
+    else:
+        print("- no commands required")
+
+
 def cmd_validate(args: argparse.Namespace) -> None:
     target = getattr(args, "target", None)
     missing = validate_requirements(args.session_id, target)
@@ -3896,6 +3968,10 @@ def build_parser() -> argparse.ArgumentParser:
     status_p = sub.add_parser("status")
     status_p.add_argument("session_id")
     status_p.set_defaults(func=cmd_status)
+
+    next_p = sub.add_parser("next")
+    next_p.add_argument("session_id")
+    next_p.set_defaults(func=cmd_next)
 
     validate_p = sub.add_parser("validate")
     validate_p.add_argument("session_id")

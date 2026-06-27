@@ -38,6 +38,7 @@ Useful commands:
 
 ```bash
 harness list
+harness next <session-id>
 harness status <session-id>
 harness validate <session-id>
 harness preflight-edit <session-id>
