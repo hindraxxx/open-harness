@@ -3,7 +3,7 @@
 Before doing harness work:
 
 1. Identify the session id from the user request, current artifact, or `harness list`.
-2. If no session exists, choose a short kebab-case session id that summarizes the request and run `harness start <session-id>`.
+2. If no session exists, choose a short kebab-case session title that summarizes the request and run `harness start <session-title>`; the harness prefixes it as `YYYYMMDD_<session-title>`.
 3. Run `harness status <session-id>`.
 4. Read this file.
 5. Read `.harness/project/index.md` for project orientation when present.

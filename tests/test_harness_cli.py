@@ -309,25 +309,40 @@ class HarnessCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)
             self.run_cli(cwd, "init")
-            self.run_cli(cwd, "start", "req-login-timeout")
+            result = self.run_cli(cwd, "start", "req-login-timeout")
+            created_line = next(line for line in result.stdout.splitlines() if line.startswith("created session: "))
+            session_id = created_line.removeprefix("created session: ")
+            self.assertRegex(session_id, r"^\d{8}_req-login-timeout$")
 
-            artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
+            artifact = cwd / ".harness" / "sessions" / session_id / "artifact.md"
             html_artifact = artifact.with_suffix(".html")
             self.assertTrue(artifact.exists())
             self.assertTrue(html_artifact.exists())
             self.assertTrue((artifact.parent / "proof").is_dir())
             text = artifact.read_text()
-            self.assertIn('session_id: "req-login-timeout"', text)
+            self.assertIn(f'session_id: "{session_id}"', text)
             self.assertIn("## Implementation Guidance", text)
             self.assertNotIn("linear_issue_key", text)
             html_text = html_artifact.read_text()
-            self.assertIn("Harness Artifact: req-login-timeout", html_text)
-            self.assertIn("<h2>Implementation Guidance</h2>", html_text)
+            self.assertIn(f"Harness Artifact: {session_id}", html_text)
+            self.assertIn("<span>Implementation Guidance</span>", html_text)
             self.assertIn('<div class="mermaid">sequenceDiagram', html_text)
             self.assertIn("cdn.jsdelivr.net/npm/mermaid", html_text)
             with sqlite3.connect(cwd / ".harness" / "harness.db") as conn:
-                row = conn.execute("SELECT state FROM sessions WHERE session_id = ?", ("req-login-timeout",)).fetchone()
+                row = conn.execute("SELECT state FROM sessions WHERE session_id = ?", (session_id,)).fetchone()
             self.assertEqual(("start",), row)
+
+    def test_start_keeps_existing_date_prefix(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+
+            result = self.run_cli(cwd, "start", "20260605_req-login-timeout")
+
+            self.assertIn("created session: 20260605_req-login-timeout", result.stdout)
+            artifact = cwd / ".harness" / "sessions" / "20260605_req-login-timeout" / "artifact.md"
+            self.assertTrue(artifact.exists())
+            self.assertIn('session_id: "20260605_req-login-timeout"', artifact.read_text())
 
     def test_plan_epic_split_flag_creates_child_artifacts(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -672,20 +687,20 @@ class HarnessCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)
             self.run_cli(cwd, "init")
-            self.run_cli(cwd, "start", "alpha")
-            self.run_cli(cwd, "start", "beta")
+            alpha = self.run_cli(cwd, "start", "alpha").stdout.splitlines()[0].removeprefix("created session: ")
+            beta = self.run_cli(cwd, "start", "beta").stdout.splitlines()[0].removeprefix("created session: ")
             with sqlite3.connect(cwd / ".harness" / "harness.db") as conn:
-                conn.execute("UPDATE sessions SET updated_at = ? WHERE session_id = ?", ("2026-01-01T00:00:00+00:00", "alpha"))
-                conn.execute("UPDATE sessions SET updated_at = ? WHERE session_id = ?", ("2026-01-02T00:00:00+00:00", "beta"))
+                conn.execute("UPDATE sessions SET updated_at = ? WHERE session_id = ?", ("2026-01-01T00:00:00+00:00", alpha))
+                conn.execute("UPDATE sessions SET updated_at = ? WHERE session_id = ?", ("2026-01-02T00:00:00+00:00", beta))
 
             result = self.run_cli(cwd, "list")
 
             lines = result.stdout.splitlines()
             self.assertEqual("session_id\tstate\tupdated_at\trecovery_attempts\tartifact", lines[0])
-            self.assertTrue(lines[1].startswith("beta\tstart\t2026-01-02T00:00:00+00:00\t0\t"))
-            self.assertTrue(lines[2].startswith("alpha\tstart\t2026-01-01T00:00:00+00:00\t0\t"))
-            self.assertIn(".harness/sessions/beta/artifact.md", lines[1])
-            self.assertIn(".harness/sessions/alpha/artifact.md", lines[2])
+            self.assertTrue(lines[1].startswith(f"{beta}\tstart\t2026-01-02T00:00:00+00:00\t0\t"))
+            self.assertTrue(lines[2].startswith(f"{alpha}\tstart\t2026-01-01T00:00:00+00:00\t0\t"))
+            self.assertIn(f".harness/sessions/{beta}/artifact.md", lines[1])
+            self.assertIn(f".harness/sessions/{alpha}/artifact.md", lines[2])
 
     def test_start_strips_legacy_linear_template_fields(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1561,8 +1576,9 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("If preflight blocks", text)
             self.assertIn("If unsure the setup is healthy", text)
             self.assertIn("harness list", text)
-            self.assertIn("choose a short kebab-case session id", text)
-            self.assertIn("harness start <session-id>", text)
+            self.assertIn("choose a short kebab-case session title", text)
+            self.assertIn("harness start <session-title>", text)
+            self.assertIn("YYYYMMDD_<session-title>", text)
             self.assertIn("harness validate <session-id>", text)
             self.assertIn("harness recover <session-id>", text)
 
@@ -1598,8 +1614,9 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn(".harness/project/index.md", (cwd / "AGENTS.md").read_text())
             common_text = (cwd / ".harness" / "agents" / "common.md").read_text()
             self.assertIn("harness list", common_text)
-            self.assertIn("choose a short kebab-case session id", common_text)
-            self.assertIn("harness start <session-id>", common_text)
+            self.assertIn("choose a short kebab-case session title", common_text)
+            self.assertIn("harness start <session-title>", common_text)
+            self.assertIn("YYYYMMDD_<session-title>", common_text)
             planning_text = (cwd / ".harness" / "agents" / "planning.md").read_text()
             self.assertIn("Read `.harness/project/index.md`", planning_text)
             self.assertIn("lower-capability implementation agent", planning_text)

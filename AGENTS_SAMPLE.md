@@ -9,7 +9,7 @@ canonical rule set; this file is the entry checklist.
    If installation is blocked by network or machine policy, stop and report the blocker.
 1. If unsure the setup is healthy, run `harness doctor`.
 2. Identify the session id from the user request, current artifact, or `harness list`.
-   If no session exists yet, choose a short kebab-case session id that summarizes the request and create it with `harness start <session-id>` before continuing.
+   If no session exists yet, choose a short kebab-case session title that summarizes the request and create it with `harness start <session-title>` before continuing; the harness prefixes it as `YYYYMMDD_<session-title>`.
    If the user asks to split the current session/work/plan, treat "split" as a request for child-session planning under the current parent session. Use `harness split-session <parent-session-id> --story ...` in `planning` state instead of creating a separate top-level session, unless the user explicitly asks for an independent new session.
    You must also decide session structure proactively during planning: if the work decomposes into two or more independently shippable units, run `harness split-session` before filling the rest of the planning artifact. Do not wait to be asked.
 3. Run `harness status <session-id>`.

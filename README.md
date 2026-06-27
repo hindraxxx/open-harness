@@ -29,10 +29,10 @@ From your target repo:
 
 ```bash
 harness start user-consent-request-id
-harness status user-consent-request-id
+harness status 20260605_user-consent-request-id
 ```
 
-`harness start <session-id>` auto-initializes missing local harness files, so most users do not need to run `harness init` separately.
+`harness start <session-title>` auto-initializes missing local harness files, prefixes the created session id as `YYYYMMDD_<session-title>`, and prints the canonical id to use with later commands.
 
 Useful commands:
 
@@ -56,6 +56,6 @@ harness update
 
 `harness update` pulls the `open-harness` repo behind the running `bin/harness`, then refreshes the target repo's guardrails and records the current CLI version in `.harness/version`.
 
-`harness start <session-id>` checks this version too. If local guardrails are outdated it prints a warning to run `harness update`, but it does not pull code or overwrite files during session start.
+`harness start <session-title>` checks this version too. If local guardrails are outdated it prints a warning to run `harness update`, but it does not pull code or overwrite files during session start.
 
 - `harness sync-guardrails` remains as a deprecated compatibility alias for the local refresh part of `harness update`.

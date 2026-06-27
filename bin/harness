@@ -17,7 +17,7 @@ from pathlib import Path
 
 
 MAX_RECOVERY_ATTEMPTS = 3
-HARNESS_VERSION = "2026.06.26.1"
+HARNESS_VERSION = "2026.06.27.1"
 
 LANGUAGE_SKILLS = [
     {"name": "java-springboot", "url": "https://raw.githubusercontent.com/github/awesome-copilot/main/skills/java-springboot/SKILL.md"},
@@ -124,6 +124,13 @@ def version_path() -> Path:
 
 def now() -> str:
     return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
+
+
+def date_prefixed_session_id(title: str, created_at: str) -> str:
+    if re.match(r"^\d{8}_", title):
+        return title
+    created = dt.datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+    return f"{created:%Y%m%d}_{title}"
 
 
 JAKARTA_TZ = dt.timezone(dt.timedelta(hours=7), "GMT+7")
@@ -513,7 +520,7 @@ def default_agents() -> dict[str, str]:
 Before doing harness work:
 
 1. Identify the session id from the user request, current artifact, or `harness list`.
-2. If no session exists, choose a short kebab-case session id that summarizes the request and run `harness start <session-id>`.
+2. If no session exists, choose a short kebab-case session title that summarizes the request and run `harness start <session-title>`; the harness prefixes it as `YYYYMMDD_<session-title>`.
 3. Run `harness status <session-id>`.
 4. Read this file.
 5. Read `.harness/project/index.md` for project orientation when present.
@@ -995,7 +1002,7 @@ canonical rule set; this file is the entry checklist.
    If installation is blocked by network or machine policy, stop and report the blocker.
 1. If unsure the setup is healthy, run `harness doctor`.
 2. Identify the session id from the user request, current artifact, or `harness list`.
-   If no session exists yet, choose a short kebab-case session id that summarizes the request and create it with `harness start <session-id>` before continuing.
+   If no session exists yet, choose a short kebab-case session title that summarizes the request and create it with `harness start <session-title>` before continuing; the harness prefixes it as `YYYYMMDD_<session-title>`.
    If the user asks to split the current session/work/plan, treat "split" as a request for child-session planning under the current parent session. Use `harness split-session <parent-session-id> --story ...` in `planning` state instead of creating a separate top-level session, unless the user explicitly asks for an independent new session.
    You must also decide session structure proactively during planning: if the work decomposes into two or more independently shippable units, run `harness split-session` before filling the rest of the planning artifact. Do not wait to be asked.
 3. Run `harness status <session-id>`.
@@ -3280,32 +3287,33 @@ def cmd_implement(args: argparse.Namespace) -> None:
 
 
 def cmd_start(args: argparse.Namespace) -> None:
-    validate_requirement_id(args.session_id, "session id")
-    if artifact_path(args.session_id).exists():
-        die(f"session already exists: {args.session_id}")
+    validate_requirement_id(args.session_id, "session title")
     warn_if_guardrails_outdated()
     if not template_path().exists():
         cmd_init(argparse.Namespace())
     if not db_path().exists():
         init_db()
     created = now()
+    session_id = date_prefixed_session_id(args.session_id, created)
+    if artifact_path(session_id).exists():
+        die(f"session already exists: {session_id}")
     content = read_text(template_path())
     replacements = {
-        "{{SESSION_ID}}": args.session_id,
+        "{{SESSION_ID}}": session_id,
         "{{CREATED_AT}}": created,
         "{{UPDATED_AT}}": created,
     }
     for old, new in replacements.items():
         content = content.replace(old, new)
     content = re.sub(r'^linear_issue_(key|url):.*\n', "", content, flags=re.MULTILINE)
-    proof_dir(args.session_id).mkdir(parents=True, exist_ok=True)
-    artifact_path(args.session_id).write_text(content)
-    insert_session(args.session_id, "start", created)
-    render_artifact_html(args.session_id)
-    print(f"created session: {args.session_id}")
-    print(f"artifact: {artifact_path(args.session_id)}")
-    print(f"html artifact: {artifact_html_path(args.session_id)}")
-    print(f"proof: {proof_dir(args.session_id)}")
+    proof_dir(session_id).mkdir(parents=True, exist_ok=True)
+    artifact_path(session_id).write_text(content)
+    insert_session(session_id, "start", created)
+    render_artifact_html(session_id)
+    print(f"created session: {session_id}")
+    print(f"artifact: {artifact_path(session_id)}")
+    print(f"html artifact: {artifact_html_path(session_id)}")
+    print(f"proof: {proof_dir(session_id)}")
 
 
 def cmd_list(_args: argparse.Namespace) -> None:
