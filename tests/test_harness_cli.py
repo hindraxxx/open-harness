@@ -1794,6 +1794,7 @@ class HarnessCliTest(unittest.TestCase):
             self.assertTrue((project / "architecture.md").exists())
             self.assertTrue((project / "index.md").exists())
             self.assertIn("Current code wins", (project / "index.md").read_text())
+            self.assertIn("stable repo orientation", (project / "index.md").read_text())
 
     def test_sync_project_map_requires_force(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1820,6 +1821,8 @@ class HarnessCliTest(unittest.TestCase):
 
             self.assertIn("synced project map", result.stdout)
             self.assertIn("Build Commands", (project / "validation.md").read_text())
+            self.assertIn("Proof Expectations", (project / "validation.md").read_text())
+            self.assertIn("command output summaries", (project / "validation.md").read_text())
             self.assertEqual("session artifact\n", artifact.read_text())
 
     def test_backend_quality_gate_requires_curl_and_sample_response(self):

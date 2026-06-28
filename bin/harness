@@ -17,7 +17,7 @@ from pathlib import Path
 
 
 MAX_RECOVERY_ATTEMPTS = 3
-HARNESS_VERSION = "2026.06.27.2"
+HARNESS_VERSION = "2026.06.28.1"
 
 LANGUAGE_SKILLS = [
     {"name": "java-springboot", "url": "https://raw.githubusercontent.com/github/awesome-copilot/main/skills/java-springboot/SKILL.md"},
@@ -411,14 +411,22 @@ def default_project_map() -> dict[str, str]:
 ## Purpose
 TBD
 
+Include the durable product/repo purpose in one short paragraph. Name what this repo owns and, when useful, what it explicitly does not own.
+
 ## Main User Workflows
 - TBD
+
+List the primary user or operator workflows this repo supports. Prefer concrete verbs and entry points over broad product claims.
 
 ## Main Domains
 - TBD
 
+Define domain terms, actors, and important concepts an implementer must understand before changing behavior.
+
 ## Entry Points
 - TBD
+
+Name the main commands, scripts, services, routes, jobs, or screens where work usually begins. Include file anchors when known.
 
 ## Current Code Wins
 This map is orientation only. Verify against current repo before planning or editing.
@@ -428,65 +436,103 @@ This map is orientation only. Verify against current repo before planning or edi
 ## Detected Architecture
 TBD
 
+Describe the architecture style in verified terms. If uncertain, write `Unknown - verify by ...` rather than guessing.
+
 ## Runtime / Frameworks
 - TBD
+
+List languages, runtimes, frameworks, package managers, and important standard-library-only constraints.
 
 ## Main Layers
 - TBD
 
+Map major directories/modules to responsibilities. Include file, class, function, or command anchors when they clarify ownership.
+
 ## Request / Data Flow
 - TBD
+
+Summarize the main runtime flow across entry points, services, persistence, generated files, and external systems.
 
 ## External Integrations
 - TBD
 
+List external APIs, CLIs, databases, filesystems, or services touched by normal workflows. Note test doubles or fixture patterns.
+
 ## Generated or Do-Not-Edit Areas
 - TBD
+
+Name generated state, caches, lockfiles, proof artifacts, or other areas that should not be manually mutated.
 """,
         "conventions.md": """# Project Conventions
 
 ## Naming
 - TBD
 
+Capture naming patterns for commands, files, tests, fixtures, states, database fields, and user-facing labels.
+
 ## File Placement
 - TBD
+
+Describe where new behavior, tests, docs, fixtures, generated templates, and scripts should live.
 
 ## Existing Patterns To Reuse
 - TBD
 
+Name helpers, local APIs, parser/serializer patterns, guard functions, or test setup styles that new work should follow.
+
 ## Anti-Patterns / Avoid
 - TBD
+
+List patterns that are risky in this repo, including broad rewrites, manual state mutation, networked tests, or duplicated logic.
 """,
         "validation.md": """# Validation Map
 
 ## Build Commands
 - TBD
 
+List setup and build commands, including syntax checks. Mark commands that are optional, slow, or environment-dependent.
+
 ## Test Commands
 - TBD
+
+List full-suite and focused test commands. Include at least one focused example for common edit surfaces when known.
 
 ## Lint / Static Checks
 - TBD
 
+List formatting, linting, type-checking, shell syntax, or static validation commands expected before handoff.
+
 ## Browser / UI Validation
 - TBD
 
+Describe browser, screenshot, or manual validation expectations for UI-facing work. Write `Not applicable` when verified.
+
 ## Proof Expectations
 - TBD
+
+Describe what evidence is expected in harness proof artifacts: command output summaries, screenshots, curl samples, logs, or files.
 """,
         "risks.md": """# Project Risks
 
 ## Auth / Permissions
 - TBD
 
+Name auth, permissions, approval, secret, or identity boundaries that changes must not bypass.
+
 ## Environment Requirements
 - TBD
+
+List required local tools, environment variables, databases, services, or OS assumptions. Mark unknown setup clearly.
 
 ## Flaky or Slow Checks
 - TBD
 
+Call out checks that are slow, flaky, destructive, external-service-dependent, or unsafe to run casually.
+
 ## High-Risk Areas
 - TBD
+
+List backward-compatibility surfaces, state migrations, installers, generated artifacts, concurrency paths, or deterministic-output areas.
 """,
         "index.md": """# Project Map Index
 
@@ -498,6 +544,15 @@ Read order:
 5. risks.md
 
 Rule: this map is orientation, not authority. Current code wins.
+
+## Maintenance Rules
+
+- Keep this map as stable repo orientation, not a session changelog.
+- Verify relevant facts against current code before planning or editing.
+- Prefer concrete file, function, command, state, and directory anchors.
+- If a fact is unknown, write `Unknown - verify by ...` instead of guessing.
+- Update stale or missing sections when discovered during planning.
+- Keep session-specific decisions, proofs, and change notes in session artifacts.
 """,
     }
 
