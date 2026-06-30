@@ -389,6 +389,7 @@ class HarnessCliTest(unittest.TestCase):
             self.assertEqual("story-001", metadata["story_id"])
             self.assertEqual("Maker submits request", metadata["title"])
             self.assertEqual("", metadata["planning_session_id"])
+            self.assertEqual("", metadata["target_repo"])
             self.assertEqual("children/story-001/plan.md", metadata["plan_md"])
             self.assertEqual("children/story-001/plan.html", metadata["plan_html"])
             self.assertEqual("draft", metadata["status"])
@@ -511,6 +512,50 @@ class HarnessCliTest(unittest.TestCase):
             self.assertNotEqual(0, result.returncode)
             self.assertIn("split-session requires session state 'planning', current state is 'start'", result.stderr)
 
+    def test_start_story_creates_repo_local_planning_session_and_links_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            coordinator = Path(tmp) / "coordinator"
+            target_repo = Path(tmp) / "target-repo"
+            coordinator.mkdir()
+            target_repo.mkdir()
+            self.run_cli(coordinator, "init")
+            self.run_cli(target_repo, "init")
+            self.run_cli(
+                coordinator,
+                "plan-epic",
+                "epic-approval",
+                "--split-stories",
+                "--story",
+                "story-001:Maker submits request",
+            )
+
+            result = self.run_cli(
+                coordinator,
+                "start-story",
+                "story-001",
+                "--repo",
+                str(target_repo),
+                "--session-id",
+                "20260630_story-001",
+            )
+
+            self.assertIn("started story session: 20260630_story-001", result.stdout)
+            target_artifact = target_repo / ".harness" / "sessions" / "20260630_story-001" / "artifact.md"
+            self.assertTrue(target_artifact.exists())
+            target_text = target_artifact.read_text()
+            self.assertIn('status: "planning"', target_text)
+            self.assertIn("Repo-local implementation session for child story `story-001`", target_text)
+            self.assertIn("This session is scoped to", target_text)
+            with sqlite3.connect(target_repo / ".harness" / "harness.db") as conn:
+                row = conn.execute("SELECT state FROM sessions WHERE session_id = ?", ("20260630_story-001",)).fetchone()
+            self.assertEqual(("planning",), row)
+
+            metadata_path = coordinator / ".harness" / "sessions" / "epic-approval" / "children" / "story-001" / "metadata.json"
+            metadata = json.loads(metadata_path.read_text())
+            self.assertEqual("20260630_story-001", metadata["planning_session_id"])
+            self.assertEqual(str(target_repo.resolve()), metadata["target_repo"])
+            self.assertEqual("planning", metadata["status"])
+
     def test_implement_resolves_ready_story_from_metadata(self):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)
@@ -536,6 +581,28 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("status: ready", result.stdout)
             self.assertIn("planning_session_id: child-session-id-a", result.stdout)
             self.assertIn(".harness/sessions/epic-approval/children/story-001/plan.md", result.stdout)
+
+    def test_implement_blocks_ready_story_without_linked_planning_session(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            self.run_cli(
+                cwd,
+                "plan-epic",
+                "epic-approval",
+                "--split-stories",
+                "--story",
+                "story-001:Maker submits request",
+            )
+            metadata_path = cwd / ".harness" / "sessions" / "epic-approval" / "children" / "story-001" / "metadata.json"
+            metadata = json.loads(metadata_path.read_text())
+            metadata["status"] = "ready"
+            metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n")
+
+            result = self.run_cli(cwd, "implement", "story-001", check=False)
+
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("has no linked repo-local planning session", result.stderr)
 
     def test_implement_blocks_missing_and_not_ready_stories(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -578,6 +645,7 @@ class HarnessCliTest(unittest.TestCase):
             story_2_metadata = cwd / ".harness" / "sessions" / "epic-approval" / "children" / "story-002" / "metadata.json"
             story_2 = json.loads(story_2_metadata.read_text())
             story_2["status"] = "ready"
+            story_2["planning_session_id"] = "child-session-id-b"
             story_2["dependencies"] = ["story-001"]
             story_2_metadata.write_text(json.dumps(story_2, indent=2, sort_keys=True) + "\n")
 
@@ -673,6 +741,41 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn('<dialog class="diagram-modal" id="diagram-modal">', html_text)
             self.assertIn('modalBody.replaceChildren(diagram.cloneNode(true));', html_text)
             self.assertIn("mermaid.initialize", html_text)
+
+    def test_next_reports_start_transition_command(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            result = self.run_cli(cwd, "start", "req-login-timeout")
+            created_line = next(line for line in result.stdout.splitlines() if line.startswith("created session: "))
+            session_id = created_line.removeprefix("created session: ")
+
+            result = self.run_cli(cwd, "next", session_id)
+
+            self.assertIn(f"Session: {session_id}", result.stdout)
+            self.assertIn("State: start", result.stdout)
+            self.assertIn("Next action: transition to planning", result.stdout)
+            self.assertIn("Blocked by: none", result.stdout)
+            self.assertIn(f"- harness validate {session_id}", result.stdout)
+            self.assertIn(f"- harness transition {session_id} planning", result.stdout)
+
+    def test_next_reports_planning_blockers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            start = self.run_cli(cwd, "start", "req-login-timeout")
+            created_line = next(line for line in start.stdout.splitlines() if line.startswith("created session: "))
+            session_id = created_line.removeprefix("created session: ")
+            self.run_cli(cwd, "transition", session_id, "planning")
+
+            result = self.run_cli(cwd, "next", session_id)
+
+            self.assertIn("State: planning", result.stdout)
+            self.assertIn("Blocked by:", result.stdout)
+            self.assertIn("- Requirement Summary must be filled", result.stdout)
+            self.assertIn("- Acceptance Criteria must be filled", result.stdout)
+            self.assertIn("After resolving blockers, run:", result.stdout)
+            self.assertIn(f"- harness approve-planning {session_id}", result.stdout)
 
     def test_list_reports_no_sessions(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1759,6 +1862,7 @@ class HarnessCliTest(unittest.TestCase):
             self.assertTrue((project / "architecture.md").exists())
             self.assertTrue((project / "index.md").exists())
             self.assertIn("Current code wins", (project / "index.md").read_text())
+            self.assertIn("stable repo orientation", (project / "index.md").read_text())
 
     def test_sync_project_map_requires_force(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1785,6 +1889,8 @@ class HarnessCliTest(unittest.TestCase):
 
             self.assertIn("synced project map", result.stdout)
             self.assertIn("Build Commands", (project / "validation.md").read_text())
+            self.assertIn("Proof Expectations", (project / "validation.md").read_text())
+            self.assertIn("command output summaries", (project / "validation.md").read_text())
             self.assertEqual("session artifact\n", artifact.read_text())
 
     def test_backend_quality_gate_requires_curl_and_sample_response(self):
