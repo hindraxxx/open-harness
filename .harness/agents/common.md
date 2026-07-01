@@ -31,7 +31,7 @@ Before doing harness work:
 - If the user asks to split the current session, work, plan, or analysis, treat "split" as child-session planning under the current parent session.
 - Use `harness split-session <parent-session-id> --story ...` while the parent is in `planning`; transition from `start` to `planning` first if needed.
 - Do not create a separate top-level session for a split request unless the user explicitly asks for an independent new session.
-- Child story artifacts are coordination plans, not implementation sessions. Before editing product code for a child story, create/link a real repo-local session with `harness start-story <story-id> --repo <repo-path>` and continue inside that repo-local session.
+- Child story artifacts are coordination plans, not implementation sessions. Before editing product code for a child story, create a real repo-local session with `harness start-story <story-id> --repo <repo-path>` or link an existing one with `harness link-story <story-id> --repo <repo-path> --session-id <session-id>`, then continue inside that repo-local session.
 - For multi-repo work, keep the parent artifact as the cross-repo user-story coordinator. Each child implementation session must live in the repo it edits and must not edit product code in sibling repos.
 - Generated child story metadata starts with an empty `planning_session_id`; fill it only after a real child planning session exists and is intentionally linked.
 

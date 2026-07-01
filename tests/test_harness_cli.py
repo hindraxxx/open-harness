@@ -368,7 +368,10 @@ class HarnessCliTest(unittest.TestCase):
             self.assertTrue((epic / "synthesis.md").exists())
             index_html = epic / "index.html"
             self.assertTrue(index_html.exists())
-            self.assertIn("children/story-001/plan.html", index_html.read_text())
+            index_html_text = index_html.read_text()
+            self.assertIn("children/story-001/plan.html", index_html_text)
+            self.assertIn("Repo Session", index_html_text)
+            self.assertIn("not linked", index_html_text)
             story_plan = epic / "children" / "story-001" / "plan.md"
             story_html = epic / "children" / "story-001" / "plan.html"
             metadata_path = epic / "children" / "story-001" / "metadata.json"
@@ -555,6 +558,51 @@ class HarnessCliTest(unittest.TestCase):
             self.assertEqual("20260630_story-001", metadata["planning_session_id"])
             self.assertEqual(str(target_repo.resolve()), metadata["target_repo"])
             self.assertEqual("planning", metadata["status"])
+            index_html = coordinator / ".harness" / "sessions" / "epic-approval" / "index.html"
+            index_html_text = index_html.read_text()
+            self.assertIn("target-repo", index_html_text)
+            self.assertIn("20260630_story-001", index_html_text)
+            self.assertIn((target_artifact.with_suffix(".html")).resolve().as_uri(), index_html_text)
+
+    def test_link_story_connects_parent_index_to_existing_repo_session(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            coordinator = Path(tmp) / "coordinator"
+            target_repo = Path(tmp) / "target-repo"
+            coordinator.mkdir()
+            target_repo.mkdir()
+            self.run_cli(coordinator, "init")
+            self.run_cli(target_repo, "init")
+            self.run_cli(target_repo, "start", "20260630_existing-story-session")
+            self.run_cli(
+                coordinator,
+                "plan-epic",
+                "epic-approval",
+                "--split-stories",
+                "--story",
+                "story-001:Maker submits request",
+            )
+
+            result = self.run_cli(
+                coordinator,
+                "link-story",
+                "story-001",
+                "--repo",
+                str(target_repo),
+                "--session-id",
+                "20260630_existing-story-session",
+            )
+
+            self.assertIn("linked story session: 20260630_existing-story-session", result.stdout)
+            metadata_path = coordinator / ".harness" / "sessions" / "epic-approval" / "children" / "story-001" / "metadata.json"
+            metadata = json.loads(metadata_path.read_text())
+            self.assertEqual("20260630_existing-story-session", metadata["planning_session_id"])
+            self.assertEqual(str(target_repo.resolve()), metadata["target_repo"])
+            self.assertEqual("start", metadata["status"])
+            target_artifact = target_repo / ".harness" / "sessions" / "20260630_existing-story-session" / "artifact.html"
+            index_html_text = (coordinator / ".harness" / "sessions" / "epic-approval" / "index.html").read_text()
+            self.assertIn("target-repo", index_html_text)
+            self.assertIn("20260630_existing-story-session", index_html_text)
+            self.assertIn(target_artifact.resolve().as_uri(), index_html_text)
 
     def test_implement_resolves_ready_story_from_metadata(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -17,7 +17,7 @@ from pathlib import Path
 
 
 MAX_RECOVERY_ATTEMPTS = 3
-HARNESS_VERSION = "2026.06.30.1"
+HARNESS_VERSION = "2026.07.01.1"
 
 LANGUAGE_SKILLS = [
     {"name": "java-springboot", "url": "https://raw.githubusercontent.com/github/awesome-copilot/main/skills/java-springboot/SKILL.md"},
@@ -603,7 +603,7 @@ Before doing harness work:
 - If the user asks to split the current session, work, plan, or analysis, treat "split" as child-session planning under the current parent session.
 - Use `harness split-session <parent-session-id> --story ...` while the parent is in `planning`; transition from `start` to `planning` first if needed.
 - Do not create a separate top-level session for a split request unless the user explicitly asks for an independent new session.
-- Child story artifacts are coordination plans, not implementation sessions. Before editing product code for a child story, create/link a real repo-local session with `harness start-story <story-id> --repo <repo-path>` and continue inside that repo-local session.
+- Child story artifacts are coordination plans, not implementation sessions. Before editing product code for a child story, create a real repo-local session with `harness start-story <story-id> --repo <repo-path>` or link an existing one with `harness link-story <story-id> --repo <repo-path> --session-id <session-id>`, then continue inside that repo-local session.
 - For multi-repo work, keep the parent artifact as the cross-repo user-story coordinator. Each child implementation session must live in the repo it edits and must not edit product code in sibling repos.
 - Generated child story metadata starts with an empty `planning_session_id`; fill it only after a real child planning session exists and is intentionally linked.
 
@@ -699,7 +699,7 @@ Keep a single session when the work is one cohesive change:
 
 If you decide to split, run `harness split-session <session-id> --story <story-id>:<title> ...` while this session is in `planning`. Fill each child's `dependencies` from the natural ordering of the work. Do not split just because the change is large; split only when units are independently shippable.
 
-For multi-repo work, split by repo-owned behavior and then materialize each child in the repo that owns the code with `harness start-story <story-id> --repo <repo-path>`. The parent session stays as the cross-repo coordination artifact; child sessions are repo-local implementation artifacts.
+For multi-repo work, split by repo-owned behavior and then materialize each child in the repo that owns the code with `harness start-story <story-id> --repo <repo-path>`, or link an existing repo-local session with `harness link-story <story-id> --repo <repo-path> --session-id <session-id>`. The parent session stays as the cross-repo coordination artifact; child sessions are repo-local implementation artifacts.
 
 If you are unsure, keep a single session. A session can be split later if implementation reveals genuinely independent work.
 
@@ -3419,6 +3419,65 @@ TBD
     return dump_frontmatter(metadata, body)
 
 
+def path_uri(path: Path) -> str:
+    return path.resolve().as_uri()
+
+
+def story_repo_label(target_repo: str) -> str:
+    if not target_repo:
+        return "_not linked_"
+    return f"[{Path(target_repo).name}]({path_uri(Path(target_repo))})"
+
+
+def story_session_label(target_repo: str, planning_session_id: str) -> str:
+    if not target_repo or not planning_session_id:
+        return "_not linked_"
+    artifact_html = Path(target_repo) / ".harness" / "sessions" / planning_session_id / "artifact.html"
+    if artifact_html.exists():
+        return f"[{planning_session_id}]({path_uri(artifact_html)})"
+    return planning_session_id
+
+
+def sorted_epic_stories(epic_base: Path) -> list[dict[str, str]]:
+    children_dir = epic_base / "children"
+    if not children_dir.exists():
+        return []
+    metadata_items = sorted(
+        (load_story_metadata(path) for path in children_dir.glob("*/metadata.json")),
+        key=lambda item: int(item.get("implementation_order", 0)),
+    )
+    return [
+        {"story_id": str(item["story_id"]), "title": str(item.get("title", item["story_id"]))}
+        for item in metadata_items
+    ]
+
+
+def update_story_link(
+    metadata_file: Path,
+    data: dict[str, object],
+    plan_md: Path,
+    story_id: str,
+    session_id: str,
+    target_repo: Path,
+    status: str,
+    updated_at: str,
+) -> None:
+    epic_base = metadata_file.parents[2]
+    epic_id = str(data.get("epic_id", epic_base.name))
+    story_title = str(data.get("title", story_id))
+    updates = {
+        "planning_session_id": session_id,
+        "target_repo": str(target_repo),
+        "status": status,
+        "updated_at": updated_at,
+    }
+    data.update(updates)
+    write_json(metadata_file, data)
+    update_story_plan_metadata(plan_md, updates)
+    render_story_plan(epic_id, {"story_id": story_id, "title": story_title}, data)
+    render_epic_index(epic_id, "child-session", sorted_epic_stories(epic_base))
+
+
 def render_epic_index(epic_id: str, mode: str, stories: list[dict[str, str]]) -> Path:
     rows = []
     for story in stories:
@@ -3426,11 +3485,18 @@ def render_epic_index(epic_id: str, mode: str, stories: list[dict[str, str]]) ->
         story_html = f"children/{story_id}/plan.html"
         metadata_file = story_metadata_path(epic_id, story_id)
         status = "draft"
+        target_repo = ""
+        planning_session_id = ""
         if metadata_file.exists():
             data = load_story_metadata(metadata_file)
             status = str(data.get("status", "draft"))
-        rows.append(f"| [{story_id}]({story_html}) | {story['title']} | {status} |")
-    story_table = "\n".join(rows) if rows else "| _single-session_ | See epic plan | draft |"
+            target_repo = str(data.get("target_repo", ""))
+            planning_session_id = str(data.get("planning_session_id", ""))
+        rows.append(
+            f"| [{story_id}]({story_html}) | {story['title']} | {status} | "
+            f"{story_repo_label(target_repo)} | {story_session_label(target_repo, planning_session_id)} |"
+        )
+    story_table = "\n".join(rows) if rows else "| _single-session_ | See epic plan | draft | _n/a_ | _n/a_ |"
     content = f"""# Epic Planning Index: {epic_id}
 
 ## Mode
@@ -3444,8 +3510,8 @@ def render_epic_index(epic_id: str, mode: str, stories: list[dict[str, str]]) ->
 
 ## Stories
 
-| Story | Title | Status |
-|---|---|---|
+| Child Plan | Title | Status | Repo | Repo Session |
+|---|---|---|---|---|
 {story_table}
 """
     return render_markdown_content_document(
@@ -3576,35 +3642,48 @@ def cmd_start_story(args: argparse.Namespace) -> None:
     finally:
         os.chdir(old_cwd)
 
-    updates = {
-        "planning_session_id": session_id,
-        "target_repo": str(target_repo),
-        "status": "planning",
-        "updated_at": created,
-    }
-    data.update(updates)
-    write_json(metadata_file, data)
-    update_story_plan_metadata(plan_md, updates)
-    render_story_plan(epic_id, {"story_id": args.story_id, "title": story_title}, data)
-    render_epic_index(
-        epic_id,
-        "child-session",
-        [
-            {"story_id": str(item["story_id"]), "title": str(item.get("title", item["story_id"]))}
-            for item in sorted(
-                (
-                    load_story_metadata(path)
-                    for path in (epic_base / "children").glob("*/metadata.json")
-                ),
-                key=lambda item: int(item.get("implementation_order", 0)),
-            )
-        ],
-    )
+    update_story_link(metadata_file, data, plan_md, args.story_id, session_id, target_repo, "planning", created)
     print(f"started story session: {session_id}")
     print(f"story: {args.story_id}")
     print(f"target repo: {target_repo}")
     print(f"artifact: {target_artifact}")
     print(f"state: planning")
+
+
+def cmd_link_story(args: argparse.Namespace) -> None:
+    validate_requirement_id(args.story_id, "story id")
+    validate_requirement_id(args.session_id, "session id")
+    metadata_file, data = find_story_metadata(args.story_id)
+    epic_base = metadata_file.parents[2]
+    plan_md = epic_base / str(data.get("plan_md", f"children/{args.story_id}/plan.md"))
+    if not plan_md.exists():
+        die(f"story plan missing: {plan_md}")
+
+    target_repo = Path(args.repo).expanduser().resolve()
+    if not target_repo.exists() or not target_repo.is_dir():
+        die(f"target repo does not exist: {target_repo}")
+    target_harness = target_repo / ".harness"
+    if not target_harness.exists():
+        die(f"target repo is not harness-initialized: {target_repo}; run `harness init` there first")
+    target_artifact = target_harness / "sessions" / args.session_id / "artifact.md"
+    if not target_artifact.exists():
+        die(f"target story session artifact does not exist: {target_artifact}")
+
+    target_meta, _body = parse_frontmatter(read_text(target_artifact))
+    status = target_meta.get("status", "planning") or "planning"
+    old_cwd = Path.cwd()
+    try:
+        os.chdir(target_repo)
+        render_artifact_html(args.session_id)
+    finally:
+        os.chdir(old_cwd)
+    updated_at = now()
+    update_story_link(metadata_file, data, plan_md, args.story_id, args.session_id, target_repo, status, updated_at)
+    print(f"linked story session: {args.session_id}")
+    print(f"story: {args.story_id}")
+    print(f"target repo: {target_repo}")
+    print(f"artifact: {target_artifact}")
+    print(f"state: {status}")
 
 
 def cmd_implement(args: argparse.Namespace) -> None:
@@ -4271,6 +4350,12 @@ def build_parser() -> argparse.ArgumentParser:
     start_story_p.add_argument("--session-id")
     start_story_p.add_argument("--force", action="store_true")
     start_story_p.set_defaults(func=cmd_start_story)
+
+    link_story_p = sub.add_parser("link-story")
+    link_story_p.add_argument("story_id")
+    link_story_p.add_argument("--repo", required=True)
+    link_story_p.add_argument("--session-id", required=True)
+    link_story_p.set_defaults(func=cmd_link_story)
 
     implement_p = sub.add_parser("implement")
     implement_p.add_argument("story_id")
