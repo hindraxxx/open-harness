@@ -22,7 +22,7 @@ Keep a single session when the work is one cohesive change:
 
 If you decide to split, run `harness split-session <session-id> --story <story-id>:<title> ...` while this session is in `planning`. Fill each child's `dependencies` from the natural ordering of the work. Do not split just because the change is large; split only when units are independently shippable.
 
-For multi-repo work, split by repo-owned behavior and then materialize each child in the repo that owns the code with `harness start-story <story-id> --repo <repo-path>`. The parent session stays as the cross-repo coordination artifact; child sessions are repo-local implementation artifacts.
+For multi-repo work, split by repo-owned behavior and then materialize each child in the repo that owns the code with `harness start-story <story-id> --repo <repo-path>`, or link an existing repo-local session with `harness link-story <story-id> --repo <repo-path> --session-id <session-id>`. The parent session stays as the cross-repo coordination artifact; child sessions are repo-local implementation artifacts.
 
 If you are unsure, keep a single session. A session can be split later if implementation reveals genuinely independent work.
 
