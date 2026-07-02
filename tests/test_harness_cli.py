@@ -40,6 +40,7 @@ class HarnessCliTest(unittest.TestCase):
         command_env.pop("LINEAR_TEAM_ID", None)
         command_env.pop("LINEAR_PROJECT_ID", None)
         command_env["HARNESS_SKIP_LANGUAGE_SKILLS"] = "1"
+        command_env["HARNESS_AUTO_SERVE"] = "0"
         if env:
             command_env.update(env)
         old_cwd = Path.cwd()
@@ -82,6 +83,7 @@ class HarnessCliTest(unittest.TestCase):
     ) -> subprocess.CompletedProcess:
         command_env = os.environ.copy()
         command_env["HARNESS_SKIP_LANGUAGE_SKILLS"] = "1"
+        command_env["HARNESS_AUTO_SERVE"] = "0"
         result = subprocess.run(
             [str(cli), *args],
             cwd=cwd,
@@ -2328,6 +2330,291 @@ class HarnessCliTest(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("Quality Check Proof needs at least one checked proof file under proof/", result.stdout)
+
+
+    # ------------------------------------------------------------------
+    # Inline annotations
+    # ------------------------------------------------------------------
+
+    def start_session(self, cwd: Path, title: str = "annotate-me") -> str:
+        self.run_cli(cwd, "init")
+        result = self.run_cli(cwd, "start", title)
+        created = next(
+            line for line in result.stdout.splitlines() if line.startswith("created session: ")
+        )
+        return created.removeprefix("created session: ").strip()
+
+    def test_slugify_is_deterministic_and_safe(self):
+        slugify = self.harness_module.slugify
+        self.assertEqual(slugify("Requirement Summary"), "requirement-summary")
+        self.assertEqual(slugify("Requirement Summary"), slugify("Requirement Summary"))
+        self.assertEqual(slugify("<code>Review</code> &amp; Fixes"), "review-fixes")
+        self.assertEqual(slugify("!!!"), "section")
+
+    def test_section_anchors_rendered_in_html(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            session_id = self.start_session(cwd)
+            self.run_cli(cwd, "status", session_id)
+            html_path = cwd / ".harness" / "sessions" / session_id / "artifact.html"
+            html = html_path.read_text()
+            self.assertIn('data-section="requirement-summary"', html)
+            self.assertIn('id="section-requirement-summary"', html)
+
+    def test_annotation_round_trip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            session_id = self.start_session(cwd)
+            old_cwd = Path.cwd()
+            try:
+                os.chdir(cwd)
+                created = self.harness_module.add_annotation(
+                    session_id,
+                    {
+                        "quote": "important detail",
+                        "comment": "please expand",
+                        "section": "requirement-summary",
+                        "prefix": "some ",
+                        "suffix": " here",
+                    },
+                )
+                stored = self.harness_module.load_annotations(session_id)
+            finally:
+                os.chdir(old_cwd)
+            self.assertEqual(len(stored), 1)
+            self.assertEqual(stored[0]["id"], created["id"])
+            self.assertEqual(stored[0]["quote"], "important detail")
+            self.assertEqual(stored[0]["status"], "open")
+            path = cwd / ".harness" / "sessions" / session_id / "annotations.json"
+            self.assertTrue(path.exists())
+
+    def test_add_annotation_requires_quote_and_comment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            session_id = self.start_session(cwd)
+            old_cwd = Path.cwd()
+            try:
+                os.chdir(cwd)
+                with self.assertRaises(ValueError):
+                    self.harness_module.add_annotation(session_id, {"quote": "x", "comment": ""})
+            finally:
+                os.chdir(old_cwd)
+
+    def test_annotations_command_resolves_and_marks_addressed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            session_id = self.start_session(cwd)
+            artifact = cwd / ".harness" / "sessions" / session_id / "artifact.md"
+            artifact.write_text(
+                artifact.read_text().replace(
+                    "## Requirement Summary\n\nTBD",
+                    "## Requirement Summary\n\nThe endpoint must validate the token first.",
+                )
+            )
+            old_cwd = Path.cwd()
+            try:
+                os.chdir(cwd)
+                created = self.harness_module.add_annotation(
+                    session_id,
+                    {
+                        "quote": "validate the token",
+                        "comment": "which store?",
+                        "section": "requirement-summary",
+                    },
+                )
+            finally:
+                os.chdir(old_cwd)
+            annotation_id = created["id"]
+
+            listed = self.run_cli(cwd, "annotations", session_id)
+            self.assertIn(annotation_id, listed.stdout)
+            self.assertIn("artifact.md:", listed.stdout)
+            self.assertIn("which store?", listed.stdout)
+
+            self.run_cli(cwd, "annotations", session_id, "--resolve", annotation_id)
+
+            after = self.run_cli(cwd, "annotations", session_id)
+            self.assertIn("No open annotations.", after.stdout)
+            with_all = self.run_cli(cwd, "annotations", session_id, "--all")
+            self.assertIn(annotation_id, with_all.stdout)
+            self.assertIn("addressed", with_all.stdout)
+
+    def test_annotations_command_flags_stale_quote(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            session_id = self.start_session(cwd)
+            old_cwd = Path.cwd()
+            try:
+                os.chdir(cwd)
+                self.harness_module.add_annotation(
+                    session_id,
+                    {
+                        "quote": "text that is not present anywhere",
+                        "comment": "check stale",
+                        "section": "requirement-summary",
+                    },
+                )
+            finally:
+                os.chdir(old_cwd)
+            listed = self.run_cli(cwd, "annotations", session_id)
+            self.assertIn("stale", listed.stdout)
+
+    def test_annotations_do_not_touch_state_machine(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            session_id = self.start_session(cwd)
+            before = self.run_cli(cwd, "status", session_id).stdout
+            old_cwd = Path.cwd()
+            try:
+                os.chdir(cwd)
+                created = self.harness_module.add_annotation(
+                    session_id,
+                    {"quote": "TBD", "comment": "note", "section": "requirement-summary"},
+                )
+                self.harness_module.update_annotation(
+                    session_id, created["id"], {"status": "addressed"}
+                )
+            finally:
+                os.chdir(old_cwd)
+            after = self.run_cli(cwd, "status", session_id).stdout
+            self.assertIn("State: start", before)
+            self.assertIn("State: start", after)
+            # No annotations table should have been created in the state store.
+            db = sqlite3.connect(cwd / ".harness" / "harness.db")
+            try:
+                tables = {
+                    row[0]
+                    for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                }
+            finally:
+                db.close()
+            self.assertNotIn("annotations", tables)
+
+    def test_serve_handler_get_post_shutdown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            session_id = self.start_session(cwd)
+            old_cwd = Path.cwd()
+            try:
+                os.chdir(cwd)
+                from http.server import ThreadingHTTPServer
+                import threading
+                import urllib.request
+
+                server = ThreadingHTTPServer(
+                    ("127.0.0.1", 0), self.harness_module.make_annotation_handler(session_id)
+                )
+                port = server.server_address[1]
+                worker = threading.Thread(target=server.serve_forever)
+                worker.start()
+                base = f"http://127.0.0.1:{port}"
+                try:
+                    page = urllib.request.urlopen(base + "/").read().decode()
+                    self.assertIn("hx-toolbar", page)
+
+                    req = urllib.request.Request(
+                        base + "/annotations",
+                        data=json.dumps(
+                            {
+                                "quote": "TBD",
+                                "comment": "served",
+                                "section": "requirement-summary",
+                            }
+                        ).encode(),
+                        headers={"Content-Type": "application/json"},
+                        method="POST",
+                    )
+                    created = json.load(urllib.request.urlopen(req))
+                    self.assertEqual(created["status"], "open")
+
+                    shutdown = urllib.request.Request(
+                        base + "/shutdown", data=b"{}", method="POST"
+                    )
+                    urllib.request.urlopen(shutdown)
+                finally:
+                    worker.join(timeout=5)
+                    server.server_close()
+                self.assertFalse(worker.is_alive())
+                self.assertEqual(len(self.harness_module.load_annotations(session_id)), 1)
+            finally:
+                os.chdir(old_cwd)
+
+
+    def test_running_serve_detects_dead_pid(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            session_id = self.start_session(cwd)
+            old_cwd = Path.cwd()
+            try:
+                os.chdir(cwd)
+                state_path = self.harness_module.serve_state_path(session_id)
+                state_path.write_text(json.dumps({"pid": 2147480000, "port": 1, "url": "http://127.0.0.1:1/"}))
+                self.assertIsNone(self.harness_module.running_serve(session_id))
+                self.assertFalse(state_path.exists())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_auto_serve_respects_env_optout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            session_id = self.start_session(cwd)
+            artifact = cwd / ".harness" / "sessions" / session_id / "artifact.md"
+            artifact.write_text(self.with_guidance(self.fill_planning(artifact.read_text())))
+            self.run_cli(cwd, "transition", session_id, "planning")
+            # run_cli sets HARNESS_AUTO_SERVE=0, so a passing planning validate must not fork/serve.
+            result = self.run_cli(cwd, "validate", session_id)
+            self.assertIn("valid", result.stdout)
+            self.assertFalse((cwd / ".harness" / "sessions" / session_id / ".serve.json").exists())
+
+    def test_start_background_serve_round_trip(self):
+        if not hasattr(os, "fork"):
+            self.skipTest("os.fork unavailable")
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            session_id = self.start_session(cwd)
+            old_cwd = Path.cwd()
+            import urllib.request
+            import time
+
+            state = None
+            try:
+                os.chdir(cwd)
+                state = self.harness_module.start_background_serve(session_id)
+                self.assertIsNotNone(state)
+                base = state["url"].rstrip("/")
+                # server responds
+                deadline = time.time() + 5
+                page = None
+                while time.time() < deadline:
+                    try:
+                        page = urllib.request.urlopen(base + "/").read().decode()
+                        break
+                    except Exception:
+                        time.sleep(0.05)
+                self.assertIsNotNone(page)
+                self.assertIn("hx-toolbar", page)
+                # dedup: running_serve reports the same live process
+                self.assertEqual(self.harness_module.running_serve(session_id)["pid"], state["pid"])
+                # Complete button -> shutdown
+                urllib.request.urlopen(urllib.request.Request(base + "/shutdown", data=b"{}", method="POST"))
+                os.waitpid(state["pid"], 0)
+                self.assertFalse((cwd / ".harness" / "sessions" / session_id / ".serve.json").exists())
+                state = None
+            finally:
+                if state and state.get("pid"):
+                    try:
+                        os.kill(state["pid"], 9)
+                        os.waitpid(state["pid"], 0)
+                    except OSError:
+                        pass
+                os.chdir(old_cwd)
+
+    def fill_planning(self, text: str) -> str:
+        text = text.replace("## Requirement Summary\n\nTBD", "## Requirement Summary\n\nShip the feature.")
+        text = text.replace("- [ ] TBD", "- [x] Acceptance exists", 1)
+        text = text.replace("- [ ] TBD", "- [x] Run validation", 1)
+        text = text.replace("- [ ] TBD", "- [x] Implementation complete", 1)
+        return text
 
 
 if __name__ == "__main__":
