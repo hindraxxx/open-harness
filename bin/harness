@@ -22,7 +22,7 @@ from pathlib import Path
 
 
 MAX_RECOVERY_ATTEMPTS = 3
-HARNESS_VERSION = "2026.07.02.7"
+HARNESS_VERSION = "2026.07.03.1"
 
 LANGUAGE_SKILLS = [
     {"name": "java-springboot", "url": "https://raw.githubusercontent.com/github/awesome-copilot/main/skills/java-springboot/SKILL.md"},
@@ -682,487 +682,33 @@ def write_project_map(overwrite: bool = False) -> list[Path]:
     return written
 
 
+def expected_agent_names() -> set[str]:
+    expected = {f"{state}.md" for state in STATES}
+    expected.add("common.md")
+    return expected
+
+
+def source_agent_docs() -> dict[str, str] | None:
+    source_dir = harness_source_root() / ".harness" / "agents"
+    expected = expected_agent_names()
+    if not source_dir.exists():
+        return None
+    docs = {}
+    for name in sorted(expected):
+        path = source_dir / name
+        if not path.exists():
+            return None
+        docs[name] = path.read_text()
+    return docs
+
+
 def default_agents() -> dict[str, str]:
-    return {
-        "common.md": """# Common Harness Agent Guardrails
-
-Before doing harness work:
-
-1. Identify the session id from the user request, current artifact, or `harness list`.
-2. If no session exists, choose a short kebab-case session title that summarizes the request and run `harness start <session-title>`; the harness prefixes it as `YYYYMMDD_<session-title>`.
-3. Run `harness status <session-id>`.
-4. Read this file.
-5. Read `.harness/project/index.md` for project orientation when present.
-6. Read the state guardrail printed by status.
-7. Before editing product code, run `harness preflight-edit <session-id>`.
-
-## Hard Rules
-
-- SQLite is canonical for session state, transitions, approvals, and proofs.
-- Markdown artifacts are required for planning, review, quality evidence, and human-readable notes.
-- Use `harness transition` for phase changes.
-- Never bypass CLI transition guards by editing artifact status manually.
-- Never edit approval metadata or hashes manually.
-- Never edit product code unless `harness preflight-edit <session-id>` exits 0.
-- If preflight blocks, stop and report the missing phase or artifact requirements.
-- Never write `.env` secrets into artifacts, logs, comments, or proof files.
-- Do not fill review, quality-check, proof, or final approval sections before their state.
-- Run `harness validate <session-id>` before every transition.
-- Treat `.harness/project/` as orientation only. Verify relevant facts against current code before using them.
-- If a project-map section is stale or missing during planning, update that section before filling the session artifact.
-
-## Split Session Requests
-
-- Proactively decide session structure during `planning`: if exploration shows two or more independently shippable units of behavior, run `harness split-session <session-id> --story ...` before filling the rest of the planning artifact. Use the criteria in the Planning State Guardrails. Do not wait for the user to ask for a split.
-- If the user asks to split the current session, work, plan, or analysis, treat "split" as child-session planning under the current parent session.
-- Use `harness split-session <parent-session-id> --story ...` while the parent is in `planning`; transition from `start` to `planning` first if needed.
-- Do not create a separate top-level session for a split request unless the user explicitly asks for an independent new session.
-- Child story artifacts are coordination plans, not implementation sessions. Before editing product code for a child story, create a real repo-local session with `harness start-story <story-id> --repo <repo-path>` or link an existing one with `harness link-story <story-id> --repo <repo-path> --session-id <session-id>`, then continue inside that repo-local session.
-- For multi-repo work, keep the parent artifact as the cross-repo user-story coordinator. Each child implementation session must live in the repo it edits and must not edit product code in sibling repos.
-- Generated child story metadata starts with an empty `planning_session_id`; fill it only after a real child planning session exists and is intentionally linked.
-
-## Final Response Gate
-
-Before any final response during harness work:
-
-1. Run `harness status <session-id>`.
-2. If `Missing:` is not `none`, resolve every missing harness item that is allowed in the current state.
-3. Run `harness validate <session-id>` before any allowed transition.
-4. If validation passes and the current state can transition without human approval, run the required `harness transition <session-id> <next-state>`.
-5. Stop only when the workflow is blocked by explicit human approval, failed validation, a required environment/proof blocker, or a harness transition guard.
-6. In the final response, report the current harness state and the next required gate.
-
-Passing tests or completing code is not enough to stop. Harness state must be clean or explicitly blocked.
-
-## Gate Order
-
-1. `planning` -> `implementation`: requires filled requirement summary, acceptance criteria checklist, validation plan checklist, implementation checklist, and explicit human planning approval.
-2. `implementation` -> `review`: requires the implementation checklist to be fully checked.
-3. `review` -> `quality-check`: requires AI review, human review, no unresolved required fixes, and explicit human review approval.
-4. `quality-check` -> `approval`: requires validation execution, recorded commands, and attached proof file under `proof/`.
-5. `approval` -> `done`: requires explicit human quality approval.
-
-## Edit Gate
-
-Product code edits are allowed only in:
-
-- `implementation`
-- `needs-fix`
-
-Product code edits are forbidden in:
-
-- `start`
-- `planning`
-- `review`
-- `quality-check`
-- `approval`
-- `blocked`
-- `done`
-
-## Auto Recovery
-
-When implementation, review, quality-check, or approval fails, use:
-
-```bash
-harness recover <session-id> --reason "what failed"
-```
-
-This increments `recovery_attempts` and transitions to `needs-fix`. After 3 recovery attempts, the next recovery request transitions to `blocked` and stops automation.
-Recovering from `review`, `quality-check`, or `approval` clears prior review approval and resets `## Review > Human Review` to `TBD`.
-Recovering from `quality-check` or `approval` also clears quality approval, resets `## Final Approval` to `TBD`, and removes stale quality commands/proof/manual validation from the active gate.
-""",
-        "start.md": """# Start State Guardrails
-
-Initialize the harness session.
-
-Allowed:
-
-- verify harness files
-- create or inspect the session artifact
-- transition to `planning`
-
-Forbidden:
-
-- product code edits
-- test code edits
-- implementation decisions
-
-Before any code edit, transition to `planning`, complete planning, then transition to `implementation`.
-""",
-        "planning.md": """# Planning State Guardrails
-
-Explore first. Ask blocking ambiguity questions. Write acceptance criteria, validation plan, implementation guidance, and implementation checklist.
-
-Use an interview loop during planning whenever exploration reveals a gap between the user's requested behavior, the proposed plan, and the current codebase. Ask short, targeted questions before filling or revising the artifact when the answer would materially change scope, requirements, behavior, success criteria, target files, data flow, or validation. Do not paper over those gaps with assumptions; record resolved answers in the relevant planning sections.
-
-## Session Structure
-
-Decide whether this work is one session or multiple child sessions before filling the rest of the artifact. Do not decide by story count alone.
-
-Cluster the requirement into independent units of behavior. Each unit must be able to stand alone with its own Old Flow / New Flow sequence diagram, validation plan, and proof. A unit that only makes sense after another ships is a dependent story, not a separate session.
-
-Use child sessions (split) when the work decomposes into two or more units that:
-
-- have disjoint code surfaces (different endpoints, services, or screens with no shared edit surface that would cause merge conflicts if worked in parallel)
-- can each be validated with an independent proof and acceptance criteria
-- can be accepted or rejected independently
-
-Keep a single session when the work is one cohesive change:
-
-- one Old Flow / New Flow sequence diagram covers the end-to-end change cleanly
-- acceptance criteria and validation plan apply to the whole change together
-- splitting would produce sessions that cannot be understood or validated in isolation
-
-If you decide to split, run `harness split-session <session-id> --story <story-id>:<title> ...` while this session is in `planning`. Fill each child's `dependencies` from the natural ordering of the work. Do not split just because the change is large; split only when units are independently shippable.
-
-For multi-repo work, split by repo-owned behavior and then materialize each child in the repo that owns the code with `harness start-story <story-id> --repo <repo-path>`, or link an existing repo-local session with `harness link-story <story-id> --repo <repo-path> --session-id <session-id>`. The parent session stays as the cross-repo coordination artifact; child sessions are repo-local implementation artifacts.
-
-If you are unsure, keep a single session. A session can be split later if implementation reveals genuinely independent work.
-
-Allowed:
-
-- read/search files
-- read `.harness/project/index.md` and the listed project-map files
-- inspect existing behavior
-- update stale or missing `.harness/project/` sections discovered during exploration
-- write artifact planning sections in `.harness/sessions/<session-id>/artifact.md`
-- ask user questions
-
-Forbidden:
-
-- product code edits
-- test code edits
-- route/controller/component changes
-- proof completion
-
-Exit only after human approval:
-
-```bash
-harness validate <session-id>
-harness approve-planning <session-id>
-harness transition <session-id> implementation
-```
-
-`harness validate <session-id>` must show no missing planning fields before asking for human approval.
-
-Agents must not run `approve-planning` unless the user explicitly instructs them to approve planning.
-`approve-planning` uses `whoami` for the approver name by default; pass `--by <human-name>` only to override it.
-
-Before filling the session artifact:
-
-1. Read `.harness/project/index.md` if present.
-2. Verify relevant project-map facts by repo search or file inspection.
-3. Update stale or missing project-map sections with verified facts.
-4. Then fill `## Requirement Summary`, `## Acceptance Criteria`, `## Validation Plan`, `## Implementation Guidance`, and `## Implementation Checklist`.
-
-Planning must include real checklist items in:
-
-- `## Acceptance Criteria`
-- `## Validation Plan`
-- `## Implementation Checklist`
-
-`## Implementation Guidance` must be detailed enough for a lower-capability implementation agent to execute without re-planning. Include:
-
-- expected file/function/module locations discovered during exploration
-- current behavior to change or preserve
-- a mandatory `### Old Flow` subsection containing a Mermaid `sequenceDiagram` that shows the end-to-end request/data flow as it currently exists in the codebase across all relevant layers (client, controller, application/domain service, repository/infrastructure, database, and external calls); label participants with exact existing files, classes, modules, or call sites discovered during exploration, for example `ReportController.php`, `ReportService`, `ReportRepository`, or `PaymentGatewayClient`; for greenfield or new-feature work, prefer diagramming the surrounding integration boundary as it exists today — the existing systems, controllers, providers, and their interactions that the new feature will plug into. For a truly greenhorn change with no predecessor flow and no existing integration boundary to attach to, the `### Old Flow` subsection may be left empty; when you do, state explicitly why (for example `_No predecessor flow — greenfield change with no existing integration boundary._`) rather than leaving it blank, so implementers know the omission is deliberate
-- a mandatory `### New Flow` subsection containing a Mermaid `sequenceDiagram` that shows the end-to-end request/data flow after the planned changes, with `alt`/`else` branches to distinguish scoped behavior changes from preserved existing behavior; label participants with exact existing files, classes, modules, or call sites where they overlap with the old flow
-- a mandatory `### Implementation Sketch` subsection containing all pseudocode, sample function shapes, and concrete code-shape steps the implementation agent can follow directly
-- a mandatory `### Code Anchors` subsection naming the exact existing variables, conditions, helper functions, or call sites the implementation must use for key decisions
-- invariants and out-of-scope areas that must not be changed
-- concrete data cases or examples the implementer should verify
-
-Do not put pseudocode or sample code in a separate top-level section. Keep it inside `### Implementation Sketch` so implementers find the intended code shape in one place.
-
-When revising `## Implementation Guidance`, re-check `### Old Flow` and `### New Flow` and update them if target files, dependencies, request/data path, side effects, or client-visible behavior changed.
-
-Do not transition to implementation with placeholder `TBD` checklist items.
-""",
-        "implementation.md": """# Implementation State Guardrails
-
-Implement approved artifact checklist items and tests.
-
-Before implementation:
-
-1. Read `## Implementation Guidance`.
-2. Read `### Old Flow` to understand the current end-to-end request/data path as it exists today. It may be empty for a greenhorn change with no predecessor flow, as long as it states why — an empty Old Flow with an explicit note is not a missing diagram.
-3. Read `### New Flow` to understand the target end-to-end request/data path, branch behavior, and expected side effects after changes.
-4. Follow the `### Implementation Sketch` as the starting code plan.
-5. Use `### Code Anchors` for the exact existing variables, conditions, helpers, and call sites to modify or preserve.
-6. If the diagrams, sketch, or code anchors are missing, ambiguous, or conflict with current code, stop and return to planning instead of re-planning silently. A deliberately empty `### Old Flow` that states why (greenhorn change with no predecessor) does not count as missing.
-
-Before editing product code, run:
-
-```bash
-harness preflight-edit <session-id>
-```
-
-Allowed:
-
-- code edits required by acceptance criteria
-- test edits required by validation plan
-- implementation checklist updates
-
-Required:
-
-- After completing each implementation task, check its item in `## Implementation Checklist`.
-- Implementation is not complete when code edits are done or tests pass.
-- Implementation is complete only after every implementation checklist item is checked, `harness validate <session-id>` passes, and `harness transition <session-id> review` succeeds or reports an explicit blocker.
-- Before reporting implementation complete, run `harness status <session-id>` and resolve any `Missing:` items allowed in `implementation`.
-- Do not summarize implementation as complete while any implementation checklist item remains unchecked or while `harness status` reports missing implementation items.
-- After every implementation checklist item is checked, run `harness validate <session-id>` and transition to `review` if validation passes.
-- Do not run validation plan commands, browser validation, screenshots, or proof attachment in `implementation`.
-- If build or unit tests fail during implementation, run `harness recover <session-id> --reason "unit test failed: <summary>"` and fix from `needs-fix`.
-
-Forbidden:
-
-- expanding scope without returning to planning
-- marking review complete
-- marking quality proof complete
-- recording `## Quality Check` commands/proof/manual validation before `quality-check`
-""",
-        "review.md": """# Review State Guardrails
-
-Run AI review, record findings, and wait for human review.
-
-Entering `review` is not a stopping point. After a successful `implementation -> review`
-transition, immediately perform the AI review and record it before responding, unless a
-harness command fails.
-
-After running AI review, immediately record it in the artifact before responding:
-
-```bash
-harness record-review <session-id> --file review.md
-```
-
-or:
-
-```bash
-harness record-review <session-id> --ai "No blocking issues."
-```
-
-AI findings are advisory until the human decides. Do not add required fixes just because AI found something.
-
-Only when the user explicitly decides a finding must be fixed, record it as a required fix:
-
-```bash
-harness record-review <session-id> --file review.md --required-fix "Fix validation gap"
-```
-
-A chat-only review is incomplete.
-
-Review is complete only after:
-
-- `## Review > AI Review` is filled by `harness record-review`.
-- Any human-selected required fixes are either absent or routed through `needs-fix`.
-- `harness status <session-id>` reports no review items missing except explicit human approval.
-- The user explicitly approves review before `harness approve-review` is run.
-
-Forbidden:
-
-- product code edits while still in review
-- fixing review findings without transitioning to `needs-fix`
-
-Required fixes go through:
-
-```bash
-harness recover <session-id> --reason "open review item: <summary>"
-```
-
-Recovery clears prior review approval and resets `## Review > Human Review` to `TBD`.
-
-Quality-check requires explicit human approval:
-
-```bash
-harness approve-review <session-id>
-harness transition <session-id> quality-check
-```
-
-Agents must not run `approve-review` unless the user explicitly instructs them to approve review.
-`approve-review` uses `whoami` for the approver name by default; pass `--by <human-name>` only to override it.
-
-Before quality-check:
-
-- `## Implementation Checklist` must be fully checked.
-- `## Review > AI Review` must be filled.
-- `## Review > Human Review` must be filled.
-- `## Review > Required Fixes` must contain only human-selected required fixes.
-- `## Review > Required Fixes` must be `None.` or all required fix checklist items must be resolved through `needs-fix`.
-""",
-        "quality-check.md": """# Quality Check State Guardrails
-
-Run validation from the artifact and attach proof.
-
-On entry:
-
-0. Confirm `harness status <session-id>` shows state `quality-check` and `Missing: none`.
-1. Read `## Validation Plan`.
-2. Execute every unchecked validation checklist item that is automatable.
-3. Mark executed validation items checked in `## Validation Plan`.
-4. Record exact commands and results under `## Quality Check > Commands Run`.
-5. Attach proof with `harness attach-proof <session-id> <file>`.
-6. Run `harness validate <session-id>`.
-7. Transition to `approval` and stop for human quality approval.
-
-Forbidden:
-
-- product code edits while still in quality-check
-- inventing proof
-- marking failed validation as complete
-
-Failed validation goes through:
-
-```bash
-harness recover <session-id> --reason "quality check failed: <summary>"
-```
-
-Recovery clears prior review approval, quality approval, and active quality evidence. The next pass must re-enter review and record fresh quality commands/proof/manual validation.
-
-Manual auth blockers require human validation notes, but quality-check still needs at least one attached proof file under `proof/`.
-
-Proof policy is configured in `.harness/harness.yml`:
-
-- `auto`: infer backend/frontend expectations from the validation plan and project map.
-- `backend`: require a curl command and sample response.
-- `frontend`: require screenshot proof and view validation notes.
-- `both`: require backend and frontend proof.
-- `manual`: require generic proof only.
-""",
-        "needs-fix.md": """# Needs-Fix State Guardrails
-
-Recovery state entered after a failed build, unit test, review, quality-check, or
-approval. Product code edits are allowed directly in this state so the agent can
-fix the recorded failure before returning through implementation.
-
-Entering from `review`, `quality-check`, or `approval` invalidates prior review approval so the next pass requires fresh human review.
-Entering from `quality-check` or `approval` also clears active quality evidence so stale proof cannot satisfy the next quality gate.
-
-On entry:
-
-1. Confirm `harness status <session-id>` shows state `needs-fix`.
-2. Read the recovery reason with `harness history <session-id>` and inspect the relevant artifact sections:
-   - failed unit tests / build: `## Implementation Checklist` and `## Implementation Guidance`.
-   - review fixes: `## Review > Required Fixes`.
-   - quality failures: `## Validation Plan` and `## Quality Check > Commands Run`.
-3. Re-read `### Old Flow`, `### New Flow`, `### Implementation Sketch`, and `### Code Anchors`
-   before changing branch behavior.
-
-Before editing product code, run:
-
-```bash
-harness preflight-edit <session-id>
-```
-
-Allowed:
-
-- code edits required to resolve the recorded failure or required fix
-- test edits required by the validation plan
-- implementation/required-fix checklist updates
-
-Required:
-
-- Address only the recorded failure or human-selected required fixes. Do not expand scope.
-- Resolve and check every relevant implementation or required-fix checklist item before transitioning forward.
-- Re-run the failing build/tests locally before transitioning.
-- Run `harness validate <session-id>` before any transition.
-
-Forbidden:
-
-- expanding scope without returning to `planning`
-- inventing proof or marking unresolved fixes complete
-- editing approval metadata, hashes, or artifact status manually
-
-Exits:
-
-```bash
-# after edits are complete and relevant checklist items are checked,
-# return through implementation
-harness transition <session-id> implementation
-
-# or stop automation if the recovery cannot be completed
-harness transition <session-id> blocked
-```
-
-If fixes fail again, recover instead of forcing a transition:
-
-```bash
-harness recover <session-id> --reason "needs-fix retry failed: <summary>"
-```
-
-After 3 recovery attempts the next recovery moves the session to `blocked` and stops automation.
-""",
-        "approval.md": """# Approval State Guardrails
-
-Human quality approval happens after validation proof exists.
-
-On entry:
-
-0. Confirm `harness status <session-id>` shows state `approval` and `Missing: none`.
-1. Present `## Quality Check` commands, proof, and manual validation notes for human review.
-2. Do not transition to `done` until the user explicitly approves the quality evidence.
-3. Only after explicit user approval, run:
-
-```bash
-harness approve-quality <session-id>
-harness transition <session-id> done
-```
-
-Agents must not run `approve-quality` unless the user explicitly instructs them to approve quality evidence.
-`approve-quality` uses `whoami` for the approver name by default; pass `--by <human-name>` only to override it.
-
-Forbidden:
-
-- product code edits while still in approval
-- changing validation output or proof
-- inventing final approval
-
-If quality evidence is rejected, use:
-
-```bash
-harness recover <session-id> --reason "quality approval rejected: <summary>"
-```
-
-Recovery clears quality approval and resets `## Final Approval` to `TBD`.
-It also clears prior review approval and active quality evidence so the next pass must be re-reviewed and re-proven.
-""",
-        "done.md": """# Done State Guardrails
-
-Verify final artifact completeness, proof links, final approval, and SQLite state.
-
-Forbidden:
-
-- product code edits
-- new acceptance criteria
-- new scope
-""",
-        "blocked.md": """# Blocked State Guardrails
-
-Automation stopped after the recovery attempt limit or an external blocker.
-
-Allowed:
-
-- inspect the blocker report
-- clarify requirements
-- fix environment or dependency blockers
-- record the human decision in the artifact
-- transition back with `harness transition`
-
-Forbidden:
-
-- product code edits before transitioning back to `implementation`
-- bypassing the blocked decision by editing artifact status manually
-
-Common exits:
-
-```bash
-harness transition <session-id> planning
-harness transition <session-id> implementation
-harness transition <session-id> quality-check
-harness transition <session-id> approval
-harness transition <session-id> done
-```
-""",
-    }
+    docs = source_agent_docs()
+    if docs is None:
+        source_dir = harness_source_root() / ".harness" / "agents"
+        missing = ", ".join(sorted(expected_agent_names()))
+        die(f"missing packaged agent guardrail docs in {source_dir}; expected: {missing}")
+    return docs
 
 
 def default_agents_bootstrap() -> str:
@@ -4965,15 +4511,15 @@ def doctor_static_issues() -> list[str]:
     expected_agents.add("common.md")
     generated_agents = set(generated)
     for name in sorted(expected_agents - generated_agents):
-        issues.append(f"generated guardrails missing {name} from default_agents()")
+        issues.append(f"source guardrails missing {name} from .harness/agents/")
     for name in sorted(generated_agents - expected_agents):
-        issues.append(f"generated guardrails include unexpected file {name}")
+        issues.append(f"source guardrails include unexpected file {name}")
     for name, content in sorted(generated.items()):
         path = agents_dir() / name
         if not path.exists():
             issues.append(f"missing guardrail file: {path}")
         elif path.read_text() != content:
-            issues.append(f"guardrail drift: {path} differs from default_agents()")
+            issues.append(f"guardrail drift: {path} differs from packaged .harness/agents/{name}")
     bootstrap = agents_bootstrap_path()
     if not bootstrap.exists():
         issues.append(f"missing bootstrap file: {bootstrap}")

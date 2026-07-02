@@ -11,6 +11,17 @@ Before implementation:
 5. Use `### Code Anchors` for the exact existing variables, conditions, helpers, and call sites to modify or preserve.
 6. If the diagrams, sketch, or code anchors are missing, ambiguous, or conflict with current code, stop and return to planning instead of re-planning silently. A deliberately empty `### Old Flow` that states why (greenhorn change with no predecessor) does not count as missing.
 
+## Bounded Worker Mode
+
+Implementation agents should treat the approved artifact as the execution contract.
+Do not perform broad repo exploration or rebuild the plan. Read only:
+
+- the approved artifact sections named above
+- files, symbols, commands, and tests explicitly named in `### Code Anchors`, `### Implementation Sketch`, `## Validation Plan`, or `## Implementation Checklist`
+- directly adjacent code needed to make a named edit compile or follow an existing local pattern
+
+If more context is required, stop and return to planning with the exact missing file, symbol, behavior, or decision. Do not silently gather unrelated context or expand scope.
+
 Before editing product code, run:
 
 ```bash

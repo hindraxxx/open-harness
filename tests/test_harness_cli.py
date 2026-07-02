@@ -1795,6 +1795,19 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("Follow the `### Implementation Sketch`", implementation_text)
             self.assertNotIn("Decision Flow", implementation_text)
             self.assertIn("Use `### Code Anchors`", implementation_text)
+            self.assertIn("Bounded Worker Mode", implementation_text)
+            self.assertIn("approved artifact as the execution contract", implementation_text)
+            self.assertIn("Do not perform broad repo exploration", implementation_text)
+            self.assertIn("return to planning with the exact missing file, symbol, behavior, or decision", implementation_text)
+            review_text = (cwd / ".harness" / "agents" / "review.md").read_text()
+            self.assertIn("review the implementation against the approved artifact", review_text)
+            self.assertIn("the current diff", review_text)
+            self.assertIn("artifact", review_text)
+            self.assertIn("insufficient for review", review_text)
+            quality_text = (cwd / ".harness" / "agents" / "quality-check.md").read_text()
+            self.assertIn("execute the approved `## Validation Plan` as written", quality_text)
+            self.assertIn("Do not invent additional validation scope", quality_text)
+            self.assertIn("return to planning with the exact", quality_text)
             self.assertTrue((cwd / ".harness" / "agents" / "needs-fix.md").exists())
             needs_fix_text = (cwd / ".harness" / "agents" / "needs-fix.md").read_text()
             self.assertIn("Needs-Fix State Guardrails", needs_fix_text)
@@ -1914,6 +1927,13 @@ class HarnessCliTest(unittest.TestCase):
         expected = {f"{state}.md" for state in self.harness_module.STATES}
         expected.add("common.md")
         self.assertEqual(expected, set(generated))
+
+    def test_generated_guardrails_are_loaded_from_source_docs(self):
+        generated = self.harness_module.default_agents()
+        self.assertEqual(
+            (ROOT / ".harness" / "agents" / "implementation.md").read_text(),
+            generated["implementation.md"],
+        )
 
     def test_init_generates_guardrail_for_every_state(self):
         with tempfile.TemporaryDirectory() as tmp:
