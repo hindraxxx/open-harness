@@ -482,7 +482,7 @@ class HarnessCliTest(unittest.TestCase):
             )
 
             epic = cwd / ".harness" / "sessions" / "epic-approval"
-            self.assertIn("split session: epic-approval", result.stdout)
+            self.assertRegex(result.stdout, r"split session: \d{8}_epic-approval")
             self.assertIn("parent artifact:", result.stdout)
             self.assertTrue((epic / "artifact.md").exists())
             self.assertTrue((epic / "artifact.html").exists())
@@ -491,12 +491,13 @@ class HarnessCliTest(unittest.TestCase):
             self.assertTrue((epic / "synthesis.md").exists())
             self.assertTrue((epic / "children" / "story-001" / "plan.md").exists())
             self.assertTrue((epic / "children" / "story-001" / "plan.html").exists())
+            session_id = self.harness_module.parse_frontmatter((epic / "artifact.md").read_text())[0]["session_id"]
             metadata = json.loads((epic / "children" / "story-001" / "metadata.json").read_text())
-            self.assertEqual("epic-approval", metadata["epic_id"])
+            self.assertEqual(session_id, metadata["epic_id"])
             self.assertEqual("story-001", metadata["story_id"])
             self.assertEqual("children/story-001/plan.md", metadata["plan_md"])
             with sqlite3.connect(cwd / ".harness" / "harness.db") as conn:
-                row = conn.execute("SELECT state FROM sessions WHERE session_id = ?", ("epic-approval",)).fetchone()
+                row = conn.execute("SELECT state FROM sessions WHERE session_id = ?", (session_id,)).fetchone()
             self.assertEqual(("planning",), row)
 
     def test_split_session_requires_planning_state(self):
@@ -775,8 +776,8 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("<li>Literal code keeps markers: <code>**not bold**</code></li>", html_text)
             self.assertIn("<ol><li>In <code>web/src/UserController.java</code>, add <code>requestId</code>.</li>", html_text)
             self.assertIn("<li>In <code>UserConsentService.java</code>, pass <code>requestId</code> through.</li></ol>", html_text)
-            self.assertIn("width: min(1380px, calc(100% - 40px));", html_text)
-            self.assertIn("grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);", html_text)
+            self.assertIn("width: min(1440px, calc(100% - 56px));", html_text)
+            self.assertIn("grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);", html_text)
             self.assertIn("overflow-wrap: break-word;", html_text)
             self.assertIn("overflow-wrap: anywhere;", html_text)
             self.assertIn(".meta th { width: 34%; }", html_text)
@@ -1379,8 +1380,9 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("No blocking issues.", text)
             self.assertIn("### Human Review\n\nTBD", text)
             self.assertIn("No blocking issues.", html_artifact.read_text())
+            session_id = self.harness_module.parse_frontmatter(artifact.read_text())[0]["session_id"]
             with sqlite3.connect(cwd / ".harness" / "harness.db") as conn:
-                count = conn.execute("SELECT COUNT(*) FROM review_passes WHERE session_id = ?", ("req-login-timeout",)).fetchone()[0]
+                count = conn.execute("SELECT COUNT(*) FROM review_passes WHERE session_id = ?", (session_id,)).fetchone()[0]
             self.assertEqual(1, count)
 
     def test_record_review_appends_file_and_human_selected_required_fixes(self):
@@ -1404,8 +1406,9 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("Found validation gap.", text)
             self.assertIn("### Required Fixes", text)
             self.assertIn("- [ ] Add missing validation test", text)
+            session_id = self.harness_module.parse_frontmatter(text)[0]["session_id"]
             with sqlite3.connect(cwd / ".harness" / "harness.db") as conn:
-                row = conn.execute("SELECT description, resolved FROM required_fixes WHERE session_id = ?", ("req-login-timeout",)).fetchone()
+                row = conn.execute("SELECT description, resolved FROM required_fixes WHERE session_id = ?", (session_id,)).fetchone()
             self.assertEqual(("Add missing validation test", 0), row)
 
     def test_record_review_without_required_fix_leaves_required_fixes_unchanged(self):
@@ -1517,7 +1520,7 @@ class HarnessCliTest(unittest.TestCase):
 
             result = self.run_cli(cwd, "history", "req-login-timeout")
 
-            self.assertIn("Session history: req-login-timeout", result.stdout)
+            self.assertRegex(result.stdout, r"Session history: \d{8}_req-login-timeout")
             self.assertIn("Transitions", result.stdout)
             self.assertIn("start -> planning success", result.stdout)
             self.assertIn("review -> needs-fix recovery reason: open review item: Add validation proof", result.stdout)
@@ -1772,6 +1775,8 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("YYYYMMDD_<session-title>", common_text)
             planning_text = (cwd / ".harness" / "agents" / "planning.md").read_text()
             self.assertIn("Read `.harness/project/index.md`", planning_text)
+            self.assertIn("Use an interview loop during planning", planning_text)
+            self.assertIn("gap between the user's requested behavior, the proposed plan, and the current codebase", planning_text)
             self.assertIn("lower-capability implementation agent", planning_text)
             self.assertIn("Old Flow", planning_text)
             self.assertIn("New Flow", planning_text)
@@ -2113,8 +2118,9 @@ class HarnessCliTest(unittest.TestCase):
 
             artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
             self.assertIn('status: "planning"', artifact.read_text())
+            session_id = self.harness_module.parse_frontmatter(artifact.read_text())[0]["session_id"]
             with sqlite3.connect(cwd / ".harness" / "harness.db") as conn:
-                state = conn.execute("SELECT state FROM sessions WHERE session_id = ?", ("req-login-timeout",)).fetchone()[0]
+                state = conn.execute("SELECT state FROM sessions WHERE session_id = ?", (session_id,)).fetchone()[0]
                 transition_count = conn.execute("SELECT COUNT(*) FROM transitions").fetchone()[0]
             self.assertEqual("planning", state)
             self.assertEqual(1, transition_count)
@@ -2238,8 +2244,9 @@ class HarnessCliTest(unittest.TestCase):
             artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
             self.assertIn("- [x] [result.txt](proof/result.txt)", artifact.read_text())
             self.assertTrue((artifact.parent / "proof" / "result.txt").exists())
+            session_id = self.harness_module.parse_frontmatter(artifact.read_text())[0]["session_id"]
             with sqlite3.connect(cwd / ".harness" / "harness.db") as conn:
-                row = conn.execute("SELECT path FROM proofs WHERE session_id = ?", ("req-login-timeout",)).fetchone()
+                row = conn.execute("SELECT path FROM proofs WHERE session_id = ?", (session_id,)).fetchone()
             self.assertTrue(row[0].endswith("proof/result.txt"))
 
     def test_install_script_clones_and_symlinks_harness(self):
