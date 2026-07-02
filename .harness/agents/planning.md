@@ -55,6 +55,17 @@ harness transition <session-id> implementation
 Agents must not run `approve-planning` unless the user explicitly instructs them to approve planning.
 `approve-planning` uses `whoami` for the approver name by default; pass `--by <human-name>` only to override it.
 
+## Inline Annotations
+
+The human can leave inline comments on the rendered plan and have you apply them, without leaving this planning session.
+
+1. When the human wants to review the plan visually, run `harness serve <session-id>`. This opens the rendered `artifact.html` in their browser with an annotation layer; they highlight text, add comments, and click **Complete** when done. Comments accumulate in `.harness/sessions/<session-id>/annotations.json`.
+2. Do **nothing** until the human explicitly asks you to act on the comments (for example "check my inline comments"). Do not act on annotations command output the moment it appears — wait for the human to ask.
+3. When asked, run `harness annotations <session-id>` to read the open batch. Each entry gives the section, the resolved location in `artifact.md` (or a `stale` marker if the quoted text moved), the quoted text, and the human's comment.
+4. Apply each requested improvement by editing `artifact.md` planning sections, then run `harness annotations <session-id> --resolve <annotation-id>` so the next round only surfaces new comments. Re-run `harness serve` whenever the human wants another editing pass.
+
+Inline annotations are a planning-only refinement loop. They do **not** transition the session, do **not** become `## Review > Required Fixes`, and do **not** authorize product-code edits — they only refine the plan artifact.
+
 Before filling the session artifact:
 
 1. Read `.harness/project/index.md` if present.

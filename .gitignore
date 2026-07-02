@@ -1,5 +1,6 @@
 .env
 .harness/harness.db
+.harness/sessions/*/annotations.json
 .idea/
 __pycache__/
 *.pyc

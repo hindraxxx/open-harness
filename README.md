@@ -88,6 +88,26 @@ harness history <session-id>
 
 HTML artifacts regenerate when you run commands such as `harness status <session-id>` or a passing `harness validate <session-id>`.
 
+## Annotate A Plan Inline
+
+During `planning`, a human can comment directly on the rendered plan and have the agent apply the comments — all in the same session.
+
+```bash
+harness serve <session-id>
+```
+
+This starts a lightweight local server on a random free loopback port and opens the rendered `artifact.html` in your default browser with an annotation layer. Select any text in the plan, add a comment, and click **Complete** (or press Ctrl-C) to stop the server. Comments are saved to `.harness/sessions/<session-id>/annotations.json` (git-ignored) and survive artifact regeneration.
+
+Then, in the same planning chat, tell the agent to check your inline comments. The agent reads them with:
+
+```bash
+harness annotations <session-id>            # open comments, resolved to lines in artifact.md
+harness annotations <session-id> --all      # include comments already addressed
+harness annotations <session-id> --resolve <annotation-id>   # mark one addressed
+```
+
+The agent applies each comment by editing `artifact.md`, marks it addressed, and you can re-run `harness serve` for another pass — only new comments surface. Inline annotations refine the plan only: they never move the workflow state, never become Required Fixes, and never authorize code edits.
+
 ## Update The CLI
 
 From a target repo that already uses harness, update the installed harness source repo and refresh local guardrails when needed:

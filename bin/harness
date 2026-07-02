@@ -12,7 +12,11 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import threading
 import urllib.request
+import uuid
+import webbrowser
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 
@@ -107,6 +111,77 @@ def proof_dir(session_id: str) -> Path:
     return sessions_dir() / session_id / "proof"
 
 
+def annotations_path(session_id: str) -> Path:
+    return sessions_dir() / session_id / "annotations.json"
+
+
+def load_annotations(session_id: str) -> list[dict]:
+    path = annotations_path(session_id)
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return []
+    return data if isinstance(data, list) else []
+
+
+def save_annotations(session_id: str, annotations: list[dict]) -> None:
+    path = annotations_path(session_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(annotations, indent=2) + "\n")
+
+
+def add_annotation(session_id: str, payload: dict) -> dict:
+    quote = str(payload.get("quote", "")).strip()
+    comment = str(payload.get("comment", "")).strip()
+    if not quote or not comment:
+        raise ValueError("annotation requires non-empty quote and comment")
+    annotation = {
+        "id": uuid.uuid4().hex,
+        "section": str(payload.get("section", "")).strip(),
+        "quote": quote,
+        "prefix": str(payload.get("prefix", "")),
+        "suffix": str(payload.get("suffix", "")),
+        "comment": comment,
+        "status": "open",
+        "created_at": now(),
+        "addressed_at": "",
+    }
+    annotations = load_annotations(session_id)
+    annotations.append(annotation)
+    save_annotations(session_id, annotations)
+    return annotation
+
+
+def update_annotation(session_id: str, annotation_id: str, changes: dict) -> dict | None:
+    annotations = load_annotations(session_id)
+    updated = None
+    for annotation in annotations:
+        if annotation.get("id") == annotation_id:
+            if "comment" in changes:
+                comment = str(changes["comment"]).strip()
+                if comment:
+                    annotation["comment"] = comment
+            if changes.get("status") in {"open", "addressed"}:
+                annotation["status"] = changes["status"]
+                annotation["addressed_at"] = now() if changes["status"] == "addressed" else ""
+            updated = annotation
+            break
+    if updated is not None:
+        save_annotations(session_id, annotations)
+    return updated
+
+
+def delete_annotation(session_id: str, annotation_id: str) -> bool:
+    annotations = load_annotations(session_id)
+    remaining = [a for a in annotations if a.get("id") != annotation_id]
+    if len(remaining) == len(annotations):
+        return False
+    save_annotations(session_id, remaining)
+    return True
+
+
 def agents_bootstrap_path() -> Path:
     sample = root() / "AGENTS_SAMPLE.md"
     if sample.exists():
@@ -124,6 +199,15 @@ def version_path() -> Path:
 
 def now() -> str:
     return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
+
+
+def slugify(text: str) -> str:
+    # Strip any inline HTML then decode entities (e.g. &amp;) so the slug is the
+    # same whether it is derived from rendered heading HTML or raw markdown.
+    normalized = re.sub(r"<[^>]+>", "", text)
+    normalized = html.unescape(normalized)
+    normalized = re.sub(r"[^a-zA-Z0-9]+", "-", normalized).strip("-").lower()
+    return normalized or "section"
 
 
 def date_prefixed_session_id(title: str, created_at: str) -> str:
@@ -1463,14 +1547,19 @@ def render_artifact_body(body: str) -> str:
     if intro:
         output.append(f'<section class="artifact-intro">{intro}</section>')
 
+    used_slugs: dict[str, int] = {}
     for index in range(1, len(sections), 2):
         heading = sections[index]
         section_body = sections[index + 1].strip() if index + 1 < len(sections) else ""
         title_match = re.fullmatch(r"<h2>(.*?)</h2>", heading, flags=re.DOTALL)
         title_html = title_match.group(1) if title_match else "Section"
+        base_slug = slugify(title_html)
+        count = used_slugs.get(base_slug, 0)
+        used_slugs[base_slug] = count + 1
+        slug = base_slug if count == 0 else f"{base_slug}-{count + 1}"
         open_attr = " open" if index == 1 else ""
         output.append(
-            f'<details class="artifact-section"{open_attr}>'
+            f'<details class="artifact-section" id="section-{slug}" data-section="{slug}"{open_attr}>'
             f'<summary><span>{title_html}</span><span class="summary-marker" aria-hidden="true"></span></summary>'
             f'<div class="section-body">{section_body}</div>'
             f"</details>"
@@ -4218,6 +4307,420 @@ def cmd_attach_proof(args: argparse.Namespace) -> None:
     print(f"attached proof: {target}")
 
 
+ANNOTATION_CLIENT_CSS = """
+.hx-toolbar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 40;
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 16px; background: #4f533f; color: #fffdf8;
+  font: 600 13px/1.4 "Geist", "Segoe UI", sans-serif;
+  box-shadow: 0 1px 6px rgba(0,0,0,0.18);
+}
+.hx-toolbar .hx-spacer { flex: 1; }
+.hx-toolbar button {
+  border: 0; border-radius: 6px; padding: 6px 14px; cursor: pointer;
+  font: inherit; background: #fffdf8; color: #4f533f;
+}
+.hx-toolbar button.hx-complete { background: #d8f0c8; }
+body { padding-top: 48px !important; }
+.hx-comment-btn {
+  position: absolute; z-index: 50; transform: translate(-50%, 6px);
+  border: 0; border-radius: 6px; padding: 5px 12px; cursor: pointer;
+  background: #4f533f; color: #fffdf8; font: 600 12px sans-serif;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+.hx-popover {
+  position: absolute; z-index: 60; width: 280px;
+  background: #fffdf8; border: 1px solid #ddd7ce; border-radius: 8px;
+  padding: 12px; box-shadow: 0 6px 24px rgba(0,0,0,0.18);
+}
+.hx-popover textarea {
+  width: 100%; min-height: 70px; box-sizing: border-box; resize: vertical;
+  border: 1px solid #ddd7ce; border-radius: 6px; padding: 6px; font: 13px sans-serif;
+}
+.hx-popover .hx-quote { font-size: 12px; color: #756f66; margin-bottom: 6px; }
+.hx-popover .hx-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+.hx-panel {
+  position: fixed; top: 48px; right: 0; bottom: 0; width: 320px; z-index: 35;
+  overflow-y: auto; padding: 14px; background: rgba(255,253,248,0.98);
+  border-left: 1px solid #ddd7ce; font: 13px/1.5 "Geist", sans-serif;
+}
+.hx-panel h3 { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: #756f66; }
+.hx-card { border: 1px solid #ddd7ce; border-radius: 8px; padding: 10px; margin-bottom: 10px; background: #fffdf8; }
+.hx-card.addressed { opacity: 0.6; }
+.hx-card .hx-badge { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: #ece8dc; color: #4f533f; }
+.hx-card.addressed .hx-badge { background: #d8f0c8; }
+.hx-card blockquote { margin: 6px 0; padding-left: 8px; border-left: 3px solid #6f725b; color: #4f533f; font-size: 12px; }
+.hx-card .hx-note { margin: 6px 0 0; }
+.hx-card .hx-del { border: 0; background: none; color: #a3524a; cursor: pointer; font-size: 12px; padding: 0; margin-top: 6px; }
+mark.hx-mark { background: #fff2b3; padding: 0 1px; border-radius: 2px; }
+body.hx-has-panel main { width: min(1100px, calc(100% - 380px)); margin-left: 24px; }
+.hx-done-overlay {
+  position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center;
+  background: rgba(35,33,29,0.72); color: #fffdf8; font: 600 18px sans-serif; text-align: center; padding: 24px;
+}
+"""
+
+ANNOTATION_CLIENT_JS = """
+(function () {
+  var annotations = window.__ANNOTATIONS__ || [];
+  var commentBtn = null, popover = null;
+
+  function api(method, path, body) {
+    return fetch(path, {
+      method: method,
+      headers: { "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined
+    }).then(function (r) { return r.ok ? r.json() : Promise.reject(r); });
+  }
+
+  function contextFor(range, sectionEl) {
+    var pre = document.createRange();
+    pre.selectNodeContents(sectionEl);
+    pre.setEnd(range.startContainer, range.startOffset);
+    var post = document.createRange();
+    post.selectNodeContents(sectionEl);
+    post.setStart(range.endContainer, range.endOffset);
+    return { prefix: pre.toString().slice(-40), suffix: post.toString().slice(0, 40) };
+  }
+
+  function clearFloating() {
+    if (commentBtn) { commentBtn.remove(); commentBtn = null; }
+    if (popover) { popover.remove(); popover = null; }
+  }
+
+  document.addEventListener("mouseup", function (e) {
+    if ((commentBtn && commentBtn.contains(e.target)) || (popover && popover.contains(e.target))) return;
+    setTimeout(function () {
+      var sel = window.getSelection();
+      if (!sel || sel.isCollapsed) { clearFloating(); return; }
+      var text = sel.toString().trim();
+      if (!text) { clearFloating(); return; }
+      var range = sel.getRangeAt(0);
+      var sectionEl = range.startContainer.parentElement
+        ? range.startContainer.parentElement.closest(".section-body, .artifact-intro")
+        : null;
+      var detailsEl = range.startContainer.parentElement
+        ? range.startContainer.parentElement.closest("[data-section]")
+        : null;
+      if (!sectionEl) { clearFloating(); return; }
+      var rect = range.getBoundingClientRect();
+      clearFloating();
+      commentBtn = document.createElement("button");
+      commentBtn.className = "hx-comment-btn";
+      commentBtn.textContent = "💬 Comment";
+      commentBtn.style.left = (window.scrollX + rect.left + rect.width / 2) + "px";
+      commentBtn.style.top = (window.scrollY + rect.bottom) + "px";
+      commentBtn.addEventListener("click", function () {
+        openPopover(text, contextFor(range, sectionEl), detailsEl ? detailsEl.getAttribute("data-section") : "", rect);
+      });
+      document.body.appendChild(commentBtn);
+    }, 10);
+  });
+
+  function openPopover(quote, ctx, section, rect) {
+    if (popover) popover.remove();
+    popover = document.createElement("div");
+    popover.className = "hx-popover";
+    popover.style.left = (window.scrollX + rect.left) + "px";
+    popover.style.top = (window.scrollY + rect.bottom + 34) + "px";
+    var q = document.createElement("div");
+    q.className = "hx-quote";
+    q.textContent = "“" + (quote.length > 90 ? quote.slice(0, 90) + "…" : quote) + "”";
+    var ta = document.createElement("textarea");
+    ta.placeholder = "Leave a comment for the agent…";
+    var actions = document.createElement("div");
+    actions.className = "hx-actions";
+    var cancel = document.createElement("button");
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", clearFloating);
+    var save = document.createElement("button");
+    save.textContent = "Save";
+    save.addEventListener("click", function () {
+      var comment = ta.value.trim();
+      if (!comment) { ta.focus(); return; }
+      api("POST", "/annotations", {
+        quote: quote, comment: comment, section: section, prefix: ctx.prefix, suffix: ctx.suffix
+      }).then(function (ann) {
+        annotations.push(ann);
+        clearFloating();
+        window.getSelection().removeAllRanges();
+        renderPanel();
+        highlightAll();
+      });
+    });
+    actions.appendChild(cancel); actions.appendChild(save);
+    popover.appendChild(q); popover.appendChild(ta); popover.appendChild(actions);
+    document.body.appendChild(popover);
+    ta.focus();
+  }
+
+  function renderPanel() {
+    var panel = document.getElementById("hx-panel");
+    if (!panel) {
+      panel = document.createElement("aside");
+      panel.className = "hx-panel"; panel.id = "hx-panel";
+      document.body.appendChild(panel);
+      document.body.classList.add("hx-has-panel");
+    }
+    var open = annotations.filter(function (a) { return a.status !== "addressed"; }).length;
+    var head = "<h3>Comments — " + open + " open</h3>";
+    if (!annotations.length) { panel.innerHTML = head + "<p style='color:#756f66'>Select text in the plan to add a comment.</p>"; return; }
+    panel.innerHTML = head + annotations.map(function (a) {
+      var cls = a.status === "addressed" ? "hx-card addressed" : "hx-card";
+      return "<div class='" + cls + "' data-id='" + a.id + "'>"
+        + "<span class='hx-badge'>" + (a.status === "addressed" ? "addressed" : "open") + "</span>"
+        + "<blockquote>" + escapeHtml(a.quote) + "</blockquote>"
+        + "<div class='hx-note'>" + escapeHtml(a.comment) + "</div>"
+        + "<button class='hx-del' data-del='" + a.id + "'>Delete</button>"
+        + "</div>";
+    }).join("");
+    panel.querySelectorAll("[data-del]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var id = btn.getAttribute("data-del");
+        api("DELETE", "/annotations/" + id).then(function () {
+          annotations = annotations.filter(function (a) { return a.id !== id; });
+          renderPanel(); highlightAll();
+        });
+      });
+    });
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+    });
+  }
+
+  function highlightAll() {
+    document.querySelectorAll("mark.hx-mark").forEach(function (m) {
+      var parent = m.parentNode; parent.replaceChild(document.createTextNode(m.textContent), m); parent.normalize();
+    });
+    annotations.forEach(function (a) {
+      var scope = a.section ? document.querySelector("[data-section='" + a.section + "'] .section-body") : document;
+      if (!scope) scope = document;
+      markFirst(scope, a.quote);
+    });
+  }
+
+  function markFirst(scope, quote) {
+    if (!quote) return;
+    var walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT, null);
+    var node;
+    while ((node = walker.nextNode())) {
+      var idx = node.nodeValue.indexOf(quote);
+      if (idx === -1) continue;
+      var range = document.createRange();
+      range.setStart(node, idx); range.setEnd(node, idx + quote.length);
+      var mark = document.createElement("mark"); mark.className = "hx-mark";
+      try { range.surroundContents(mark); } catch (e) { }
+      return;
+    }
+  }
+
+  function buildToolbar() {
+    var bar = document.createElement("div");
+    bar.className = "hx-toolbar";
+    bar.innerHTML = "<span>📝 Annotate plan</span><span class='hx-spacer'></span>";
+    var complete = document.createElement("button");
+    complete.className = "hx-complete";
+    complete.textContent = "Complete";
+    complete.addEventListener("click", function () {
+      api("POST", "/shutdown", {}).catch(function () { }).then(showDone);
+      setTimeout(showDone, 400);
+    });
+    bar.appendChild(complete);
+    document.body.appendChild(bar);
+  }
+
+  function showDone() {
+    if (document.querySelector(".hx-done-overlay")) return;
+    var o = document.createElement("div");
+    o.className = "hx-done-overlay";
+    o.textContent = "Comments saved. You can close this tab and ask the agent to check your inline comments.";
+    document.body.appendChild(o);
+  }
+
+  buildToolbar();
+  renderPanel();
+  highlightAll();
+})();
+"""
+
+
+def build_annotation_page(session_id: str) -> str:
+    html_path = render_artifact_html(session_id)
+    if html_path is None:
+        return "<!doctype html><meta charset=utf-8><p>No artifact for this session.</p>"
+    document = html_path.read_text()
+    payload = json.dumps(load_annotations(session_id))
+    injection = (
+        "<style>" + ANNOTATION_CLIENT_CSS + "</style>"
+        + "<script>window.__ANNOTATIONS__ = " + payload + ";</script>"
+        + "<script>" + ANNOTATION_CLIENT_JS + "</script>"
+    )
+    if "</body>" in document:
+        return document.replace("</body>", injection + "</body>", 1)
+    return document + injection
+
+
+def make_annotation_handler(session_id: str):
+    class AnnotationHandler(BaseHTTPRequestHandler):
+        def log_message(self, *_args) -> None:  # keep the CLI output quiet
+            pass
+
+        def _send(self, code: int, body: str, content_type: str = "application/json") -> None:
+            data = body.encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def _read_json(self) -> dict:
+            length = int(self.headers.get("Content-Length", 0) or 0)
+            if not length:
+                return {}
+            try:
+                return json.loads(self.rfile.read(length).decode("utf-8"))
+            except (ValueError, UnicodeDecodeError):
+                return {}
+
+        def do_GET(self) -> None:  # noqa: N802
+            if self.path == "/":
+                self._send(200, build_annotation_page(session_id), "text/html; charset=utf-8")
+            elif self.path == "/annotations":
+                self._send(200, json.dumps(load_annotations(session_id)))
+            else:
+                self._send(404, json.dumps({"error": "not found"}))
+
+        def do_POST(self) -> None:  # noqa: N802
+            if self.path == "/annotations":
+                try:
+                    annotation = add_annotation(session_id, self._read_json())
+                except ValueError as exc:
+                    self._send(400, json.dumps({"error": str(exc)}))
+                    return
+                self._send(201, json.dumps(annotation))
+            elif self.path.startswith("/annotations/"):
+                annotation_id = self.path.rsplit("/", 1)[-1]
+                updated = update_annotation(session_id, annotation_id, self._read_json())
+                if updated is None:
+                    self._send(404, json.dumps({"error": "not found"}))
+                else:
+                    self._send(200, json.dumps(updated))
+            elif self.path == "/shutdown":
+                self._send(200, json.dumps({"ok": True}))
+                threading.Thread(target=self.server.shutdown, daemon=True).start()
+            else:
+                self._send(404, json.dumps({"error": "not found"}))
+
+        def do_DELETE(self) -> None:  # noqa: N802
+            if self.path.startswith("/annotations/"):
+                annotation_id = self.path.rsplit("/", 1)[-1]
+                ok = delete_annotation(session_id, annotation_id)
+                self._send(200 if ok else 404, json.dumps({"ok": ok}))
+            else:
+                self._send(404, json.dumps({"error": "not found"}))
+
+    return AnnotationHandler
+
+
+def cmd_serve(args: argparse.Namespace) -> None:
+    current_state(args.session_id)  # validates the session exists
+    if not artifact_path(args.session_id).exists():
+        die(f"artifact not found for session: {args.session_id}")
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_annotation_handler(args.session_id))
+    port = server.server_address[1]
+    url = f"http://127.0.0.1:{port}/"
+    print(f"Serving annotation view for {args.session_id} at {url}")
+    print('Add inline comments in the browser, then click "Complete" (or press Ctrl-C) to stop.')
+    try:
+        webbrowser.open(url)
+    except Exception:
+        pass
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+    open_count = sum(1 for a in load_annotations(args.session_id) if a.get("status") != "addressed")
+    print(f"Stopped. {open_count} open annotation(s) saved to {annotations_path(args.session_id)}")
+
+
+def artifact_sections(body: str) -> list[dict]:
+    """Split artifact markdown into level-2 sections, mirroring render_artifact_body slugs."""
+    sections: list[dict] = []
+    used_slugs: dict[str, int] = {}
+    current: dict | None = None
+    for offset, line in enumerate(body.splitlines()):
+        match = re.match(r"^##\s+(.*)$", line)
+        if match:
+            title = match.group(1).strip()
+            base_slug = slugify(title)
+            count = used_slugs.get(base_slug, 0)
+            used_slugs[base_slug] = count + 1
+            slug = base_slug if count == 0 else f"{base_slug}-{count + 1}"
+            current = {"title": title, "slug": slug, "lines": []}
+            sections.append(current)
+        elif current is not None:
+            current["lines"].append((offset + 1, line))
+    return sections
+
+
+def locate_quote(section: dict, quote: str) -> tuple[int | None, str]:
+    quote = quote.strip()
+    if not quote:
+        return None, ""
+    for lineno, line in section["lines"]:
+        if quote in line:
+            return lineno, line.strip()
+    text = "\n".join(line for _, line in section["lines"])
+    if quote in text:
+        return section["lines"][0][0] if section["lines"] else None, "(matches across multiple lines)"
+    normalized = re.sub(r"\s+", " ", text)
+    if re.sub(r"\s+", " ", quote) in normalized:
+        return section["lines"][0][0] if section["lines"] else None, "(matches with normalized whitespace)"
+    return None, ""
+
+
+def cmd_annotations(args: argparse.Namespace) -> None:
+    session_id = args.session_id
+    if args.resolve:
+        updated = update_annotation(session_id, args.resolve, {"status": "addressed"})
+        if updated is None:
+            die(f"annotation not found: {args.resolve}")
+        print(f"marked addressed: {args.resolve}")
+        return
+    path = artifact_path(session_id)
+    if not path.exists():
+        die(f"artifact not found for session: {session_id}")
+    annotations = load_annotations(session_id)
+    if not args.all:
+        annotations = [a for a in annotations if a.get("status") != "addressed"]
+    if not annotations:
+        print("No annotations." if args.all else "No open annotations.")
+        return
+    body = parse_frontmatter(read_text(path))[1]
+    sections = {section["slug"]: section for section in artifact_sections(body)}
+    print(f"{len(annotations)} annotation(s) for {session_id}:\n")
+    for annotation in annotations:
+        section = sections.get(annotation.get("section", ""))
+        print(f"[{annotation['id']}] ({annotation.get('status', 'open')})")
+        if section:
+            lineno, snippet = locate_quote(section, annotation.get("quote", ""))
+            print(f"  section: ## {section['title']}")
+            if lineno:
+                print(f"  location: {path.name}:{lineno}  {snippet}".rstrip())
+            else:
+                print(f"  location: stale — text not found; search section '## {section['title']}'")
+        else:
+            print(f"  section: (unknown slug '{annotation.get('section', '')}')")
+        print(f"  quote: {annotation.get('quote', '')!r}")
+        print(f"  comment: {annotation.get('comment', '')}")
+        print()
+
+
 def cmd_migrate_sqlite(_args: argparse.Namespace) -> None:
     migrated = migrate_sqlite()
     print(f"migrated sessions: {migrated}")
@@ -4458,6 +4961,16 @@ def build_parser() -> argparse.ArgumentParser:
     proof_p.add_argument("session_id")
     proof_p.add_argument("file")
     proof_p.set_defaults(func=cmd_attach_proof)
+
+    serve_p = sub.add_parser("serve")
+    serve_p.add_argument("session_id")
+    serve_p.set_defaults(func=cmd_serve)
+
+    annotations_p = sub.add_parser("annotations")
+    annotations_p.add_argument("session_id")
+    annotations_p.add_argument("--all", action="store_true", help="include annotations already marked addressed")
+    annotations_p.add_argument("--resolve", metavar="ANNOTATION_ID", help="mark the given annotation id as addressed")
+    annotations_p.set_defaults(func=cmd_annotations)
 
     return parser
 
