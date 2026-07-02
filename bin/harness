@@ -14,6 +14,7 @@ import subprocess
 import sys
 import threading
 import urllib.request
+import urllib.parse
 import uuid
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -21,7 +22,7 @@ from pathlib import Path
 
 
 MAX_RECOVERY_ATTEMPTS = 3
-HARNESS_VERSION = "2026.07.02.2"
+HARNESS_VERSION = "2026.07.02.4"
 
 LANGUAGE_SKILLS = [
     {"name": "java-springboot", "url": "https://raw.githubusercontent.com/github/awesome-copilot/main/skills/java-springboot/SKILL.md"},
@@ -180,6 +181,10 @@ def delete_annotation(session_id: str, annotation_id: str) -> bool:
         return False
     save_annotations(session_id, remaining)
     return True
+
+
+def session_alias_path(session_title: str) -> Path:
+    return sessions_dir() / session_title
 
 
 def agents_bootstrap_path() -> Path:
@@ -782,6 +787,8 @@ Before any code edit, transition to `planning`, complete planning, then transiti
 
 Explore first. Ask blocking ambiguity questions. Write acceptance criteria, validation plan, implementation guidance, and implementation checklist.
 
+Use an interview loop during planning whenever exploration reveals a gap between the user's requested behavior, the proposed plan, and the current codebase. Ask short, targeted questions before filling or revising the artifact when the answer would materially change scope, requirements, behavior, success criteria, target files, data flow, or validation. Do not paper over those gaps with assumptions; record resolved answers in the relevant planning sections.
+
 ## Session Structure
 
 Decide whether this work is one session or multiple child sessions before filling the rest of the artifact. Do not decide by story count alone.
@@ -1262,7 +1269,7 @@ def is_harness_owned_path(path: str) -> bool:
         path.startswith(".harness/")
         or path == ".agents/"
         or path.startswith(".agents/skills/")
-        or path in {"AGENTS.md", ".env.example", ".gitignore"}
+        or path in {"AGENTS.md", "CLAUDE.md", ".env.example", ".gitignore"}
     )
 
 
@@ -2324,6 +2331,23 @@ def init_db() -> None:
 def db_session(session_id: str) -> sqlite3.Row | None:
     with db() as conn:
         return conn.execute("SELECT * FROM sessions WHERE session_id = ?", (session_id,)).fetchone()
+
+
+def resolve_session_id(session_id: str) -> str:
+    if db_session(session_id):
+        return session_id
+    if re.match(r"^\d{8}_", session_id):
+        return session_id
+    if not db_path().exists():
+        return session_id
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT session_id FROM sessions WHERE session_id LIKE ? ORDER BY created_at DESC, session_id ASC",
+            (f"_________{session_id}",),
+        ).fetchall()
+    if len(rows) == 1:
+        return rows[0]["session_id"]
+    return session_id
 
 
 def insert_session(session_id: str, state: str, created_at: str) -> None:
@@ -3869,6 +3893,10 @@ def cmd_start(args: argparse.Namespace) -> None:
     content = re.sub(r'^linear_issue_(key|url):.*\n', "", content, flags=re.MULTILINE)
     proof_dir(session_id).mkdir(parents=True, exist_ok=True)
     artifact_path(session_id).write_text(content)
+    if session_id != args.session_id:
+        alias = session_alias_path(args.session_id)
+        if not alias.exists():
+            alias.symlink_to(Path(session_id))
     insert_session(session_id, "start", created)
     render_artifact_html(session_id)
     print(f"created session: {session_id}")
@@ -4586,38 +4614,45 @@ def make_annotation_handler(session_id: str):
             except (ValueError, UnicodeDecodeError):
                 return {}
 
+        def _route_path(self) -> str:
+            parsed = urllib.parse.urlsplit(self.path)
+            return parsed.path or "/"
+
         def do_GET(self) -> None:  # noqa: N802
-            if self.path == "/":
+            path = self._route_path()
+            if path == "/":
                 self._send(200, build_annotation_page(session_id), "text/html; charset=utf-8")
-            elif self.path == "/annotations":
+            elif path == "/annotations":
                 self._send(200, json.dumps(load_annotations(session_id)))
             else:
                 self._send(404, json.dumps({"error": "not found"}))
 
         def do_POST(self) -> None:  # noqa: N802
-            if self.path == "/annotations":
+            path = self._route_path()
+            if path == "/annotations":
                 try:
                     annotation = add_annotation(session_id, self._read_json())
                 except ValueError as exc:
                     self._send(400, json.dumps({"error": str(exc)}))
                     return
                 self._send(201, json.dumps(annotation))
-            elif self.path.startswith("/annotations/"):
-                annotation_id = self.path.rsplit("/", 1)[-1]
+            elif path.startswith("/annotations/"):
+                annotation_id = path.rsplit("/", 1)[-1]
                 updated = update_annotation(session_id, annotation_id, self._read_json())
                 if updated is None:
                     self._send(404, json.dumps({"error": "not found"}))
                 else:
                     self._send(200, json.dumps(updated))
-            elif self.path == "/shutdown":
+            elif path == "/shutdown":
                 self._send(200, json.dumps({"ok": True}))
                 threading.Thread(target=self.server.shutdown, daemon=True).start()
             else:
                 self._send(404, json.dumps({"error": "not found"}))
 
         def do_DELETE(self) -> None:  # noqa: N802
-            if self.path.startswith("/annotations/"):
-                annotation_id = self.path.rsplit("/", 1)[-1]
+            path = self._route_path()
+            if path.startswith("/annotations/"):
+                annotation_id = path.rsplit("/", 1)[-1]
                 ok = delete_annotation(session_id, annotation_id)
                 self._send(200 if ok else 404, json.dumps({"ok": ok}))
             else:
@@ -5083,6 +5118,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
+    if hasattr(args, "session_id") and args.command not in {"start", "start-story", "link-story"}:
+        args.session_id = resolve_session_id(args.session_id)
     args.func(args)
 
 
