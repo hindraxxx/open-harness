@@ -5,11 +5,11 @@ Implement approved artifact checklist items and tests.
 Before implementation:
 
 1. Read `## Implementation Guidance`.
-2. Read `### Old Flow` to understand the current end-to-end request/data path as it exists today.
+2. Read `### Old Flow` to understand the current end-to-end request/data path as it exists today. It may be empty for a greenhorn change with no predecessor flow, as long as it states why — an empty Old Flow with an explicit note is not a missing diagram.
 3. Read `### New Flow` to understand the target end-to-end request/data path, branch behavior, and expected side effects after changes.
 4. Follow the `### Implementation Sketch` as the starting code plan.
 5. Use `### Code Anchors` for the exact existing variables, conditions, helpers, and call sites to modify or preserve.
-6. If the diagrams, sketch, or code anchors are missing, ambiguous, or conflict with current code, stop and return to planning instead of re-planning silently.
+6. If the diagrams, sketch, or code anchors are missing, ambiguous, or conflict with current code, stop and return to planning instead of re-planning silently. A deliberately empty `### Old Flow` that states why (greenhorn change with no predecessor) does not count as missing.
 
 Before editing product code, run:
 
