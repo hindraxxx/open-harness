@@ -2,6 +2,15 @@
 
 Run AI review, record findings, and wait for human review.
 
+## Bounded Worker Mode
+
+Review agents should review the implementation against the approved artifact and
+the current diff. Do not perform broad repo exploration or introduce new scope.
+Read only the approved planning sections, changed files, relevant tests, and
+directly referenced code needed to verify a specific finding. If the artifact
+is insufficient for review, record that as the review finding instead of
+re-planning.
+
 Entering `review` is not a stopping point. After a successful `implementation -> review`
 transition, immediately perform the AI review and record it before responding, unless a
 harness command fails.

@@ -2,6 +2,15 @@
 
 Run validation from the artifact and attach proof.
 
+## Bounded Worker Mode
+
+Quality-check agents should execute the approved `## Validation Plan` as written.
+Do not invent additional validation scope or search broadly for alternative
+checks. Read only the validation plan, proof expectations, command outputs, and
+files directly needed to run or attach the approved proof. If the validation
+plan is incomplete, recover to `needs-fix` or return to planning with the exact
+gap instead of expanding validation silently.
+
 On entry:
 
 0. Confirm `harness status <session-id>` shows state `quality-check` and `Missing: none`.

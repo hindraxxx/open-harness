@@ -2,6 +2,8 @@
 
 Explore first. Ask blocking ambiguity questions. Write acceptance criteria, validation plan, implementation guidance, and implementation checklist.
 
+Use an interview loop during planning whenever exploration reveals a gap between the user's requested behavior, the proposed plan, and the current codebase. Ask short, targeted questions before filling or revising the artifact when the answer would materially change scope, requirements, behavior, success criteria, target files, data flow, or validation. Do not paper over those gaps with assumptions; record resolved answers in the relevant planning sections.
+
 ## Session Structure
 
 Decide whether this work is one session or multiple child sessions before filling the rest of the artifact. Do not decide by story count alone.

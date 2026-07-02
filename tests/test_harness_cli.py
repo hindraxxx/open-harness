@@ -115,6 +115,8 @@ class HarnessCliTest(unittest.TestCase):
         seed.mkdir()
         (seed / "bin").mkdir()
         shutil.copy2(CLI, seed / "bin" / "harness")
+        shutil.copytree(ROOT / ".harness" / "agents", seed / ".harness" / "agents")
+        shutil.copytree(ROOT / ".harness" / "skills", seed / ".harness" / "skills")
         os.chmod(seed / "bin" / "harness", 0o755)
         (seed / "README.md").write_text("v1\n")
         self.git(seed, "init", "-b", "main")
@@ -137,6 +139,8 @@ class HarnessCliTest(unittest.TestCase):
         (source / "bin").mkdir(parents=True)
         shutil.copy2(CLI, source / "bin" / "harness")
         shutil.copy2(INSTALLER, source / "install.sh")
+        shutil.copytree(ROOT / ".harness" / "agents", source / ".harness" / "agents")
+        shutil.copytree(ROOT / ".harness" / "skills", source / ".harness" / "skills")
         os.chmod(source / "bin" / "harness", 0o755)
         os.chmod(source / "install.sh", 0o755)
         (source / "README.md").write_text("installer fixture\n")
@@ -1791,6 +1795,19 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("Follow the `### Implementation Sketch`", implementation_text)
             self.assertNotIn("Decision Flow", implementation_text)
             self.assertIn("Use `### Code Anchors`", implementation_text)
+            self.assertIn("Bounded Worker Mode", implementation_text)
+            self.assertIn("approved artifact as the execution contract", implementation_text)
+            self.assertIn("Do not perform broad repo exploration", implementation_text)
+            self.assertIn("return to planning with the exact missing file, symbol, behavior, or decision", implementation_text)
+            review_text = (cwd / ".harness" / "agents" / "review.md").read_text()
+            self.assertIn("review the implementation against the approved artifact", review_text)
+            self.assertIn("the current diff", review_text)
+            self.assertIn("artifact", review_text)
+            self.assertIn("insufficient for review", review_text)
+            quality_text = (cwd / ".harness" / "agents" / "quality-check.md").read_text()
+            self.assertIn("execute the approved `## Validation Plan` as written", quality_text)
+            self.assertIn("Do not invent additional validation scope", quality_text)
+            self.assertIn("return to planning with the exact", quality_text)
             self.assertTrue((cwd / ".harness" / "agents" / "needs-fix.md").exists())
             needs_fix_text = (cwd / ".harness" / "agents" / "needs-fix.md").read_text()
             self.assertIn("Needs-Fix State Guardrails", needs_fix_text)
@@ -1831,6 +1848,22 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn(f"harness version: 0 -> {self.harness_module.HARNESS_VERSION}", result.stdout)
             self.assertIn("Harness Agent Bootstrap", (cwd / "AGENTS.md").read_text())
             self.assertEqual(self.harness_module.HARNESS_VERSION, (cwd / ".harness" / "version").read_text().strip())
+
+    def test_update_refreshes_local_code_review_skill(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            skill_file = cwd / ".agents" / "skills" / "code-review-expert" / "SKILL.md"
+            skill_file.write_text("stale\n")
+
+            result = self.run_cli(cwd, "update", "--skip-pull")
+
+            self.assertIn("installed/refreshed local skills: code-review-expert", result.stdout)
+            self.assertIn("Code Review Expert", skill_file.read_text())
+            self.assertEqual(
+                skill_file.resolve(),
+                (cwd / ".codex" / "skills" / "code-review-expert" / "SKILL.md").resolve(),
+            )
 
     def test_update_skip_pull_refreshes_when_target_guardrails_are_current(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1895,6 +1928,13 @@ class HarnessCliTest(unittest.TestCase):
         expected.add("common.md")
         self.assertEqual(expected, set(generated))
 
+    def test_generated_guardrails_are_loaded_from_source_docs(self):
+        generated = self.harness_module.default_agents()
+        self.assertEqual(
+            (ROOT / ".harness" / "agents" / "implementation.md").read_text(),
+            generated["implementation.md"],
+        )
+
     def test_init_generates_guardrail_for_every_state(self):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)
@@ -1902,6 +1942,42 @@ class HarnessCliTest(unittest.TestCase):
 
             for state in self.harness_module.STATES:
                 self.assertTrue((cwd / ".harness" / "agents" / f"{state}.md").exists(), state)
+
+    def test_init_installs_local_code_review_skill_and_mirrors(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+
+            result = self.run_cli(cwd, "init")
+
+            skill_dir = cwd / ".agents" / "skills" / "code-review-expert"
+            self.assertIn("installed local skills: code-review-expert", result.stdout)
+            self.assertTrue((skill_dir / "SKILL.md").exists())
+            self.assertTrue((skill_dir / "references" / "security-checklist.md").exists())
+            for mirror in (".codex", ".claude", ".opencode"):
+                mirror_path = cwd / mirror / "skills" / "code-review-expert"
+                self.assertTrue(mirror_path.is_symlink(), mirror_path)
+                self.assertEqual(skill_dir.resolve(), mirror_path.resolve())
+            opencode_path = cwd / "skills" / "code-review-expert"
+            self.assertTrue(opencode_path.is_symlink())
+            self.assertEqual(skill_dir.resolve(), opencode_path.resolve())
+
+    def test_init_appends_to_existing_project_skills_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            existing_dir = cwd / "skills" / "existing-skill"
+            existing_dir.mkdir(parents=True)
+            existing_file = existing_dir / "SKILL.md"
+            existing_file.write_text("existing\n")
+
+            self.run_cli(cwd, "init")
+
+            self.assertEqual("existing\n", existing_file.read_text())
+            appended = cwd / "skills" / "code-review-expert"
+            self.assertTrue(appended.is_symlink())
+            self.assertEqual(
+                (cwd / ".agents" / "skills" / "code-review-expert").resolve(),
+                appended.resolve(),
+            )
 
     def test_init_project_map_creates_missing_files_without_overwrite(self):
         with tempfile.TemporaryDirectory() as tmp:
