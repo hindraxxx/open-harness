@@ -22,13 +22,19 @@ from pathlib import Path
 
 
 MAX_RECOVERY_ATTEMPTS = 3
-HARNESS_VERSION = "2026.07.02.4"
+HARNESS_VERSION = "2026.07.02.7"
 
 LANGUAGE_SKILLS = [
     {"name": "java-springboot", "url": "https://raw.githubusercontent.com/github/awesome-copilot/main/skills/java-springboot/SKILL.md"},
     {"name": "kotlin-springboot", "url": "https://raw.githubusercontent.com/github/awesome-copilot/main/skills/kotlin-springboot/SKILL.md"},
     {"name": "php-pro", "url": "https://raw.githubusercontent.com/jeffallan/claude-skills/main/skills/php-pro/SKILL.md"},
     {"name": "typescript-pro", "url": "https://raw.githubusercontent.com/jeffallan/claude-skills/main/skills/typescript-pro/SKILL.md"},
+]
+LOCAL_SKILL_MIRRORS = [
+    ".codex/skills",
+    ".claude/skills",
+    ".opencode/skills",
+    "skills",
 ]
 STATES = ["start", "planning", "implementation", "review", "needs-fix", "quality-check", "approval", "blocked", "done"]
 TRANSITIONS = {
@@ -1269,6 +1275,14 @@ def is_harness_owned_path(path: str) -> bool:
         path.startswith(".harness/")
         or path == ".agents/"
         or path.startswith(".agents/skills/")
+        or path == ".codex/"
+        or path.startswith(".codex/skills/")
+        or path == ".claude/"
+        or path.startswith(".claude/skills/")
+        or path == ".opencode/"
+        or path.startswith(".opencode/skills/")
+        or path == "skills/"
+        or path.startswith("skills/")
         or path in {"AGENTS.md", "CLAUDE.md", ".env.example", ".gitignore"}
     )
 
@@ -3077,6 +3091,60 @@ def skills_dir() -> Path:
     return root() / ".agents" / "skills"
 
 
+def packaged_skills_dir() -> Path:
+    return harness_source_root() / ".harness" / "skills"
+
+
+def packaged_skill_sources() -> list[Path]:
+    base = packaged_skills_dir()
+    if not base.exists():
+        return []
+    return sorted(
+        entry for entry in base.iterdir() if entry.is_dir() and (entry / "SKILL.md").exists()
+    )
+
+
+def replace_path(path: Path) -> None:
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+        return
+    if path.exists():
+        shutil.rmtree(path)
+
+
+def ensure_skill_mirror(path: Path, target: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    desired = os.path.relpath(target, path.parent)
+    if path.is_symlink():
+        if os.readlink(path) != desired:
+            path.unlink()
+            path.symlink_to(desired)
+        return
+    if path.exists():
+        replace_path(path)
+    path.symlink_to(desired)
+
+
+def sync_local_skill_mirrors(skill_name: str, target_dir: Path) -> None:
+    for mirror in LOCAL_SKILL_MIRRORS:
+        ensure_skill_mirror(root() / mirror / skill_name, target_dir)
+
+
+def install_local_skills(force: bool = False) -> list[str]:
+    installed = []
+    sd = skills_dir()
+    sd.mkdir(parents=True, exist_ok=True)
+    for source_dir in packaged_skill_sources():
+        target_dir = sd / source_dir.name
+        if force or not (target_dir / "SKILL.md").exists():
+            if target_dir.exists() or target_dir.is_symlink():
+                replace_path(target_dir)
+            shutil.copytree(source_dir, target_dir)
+            installed.append(source_dir.name)
+        sync_local_skill_mirrors(source_dir.name, target_dir)
+    return installed
+
+
 def install_language_skills(force: bool = False) -> list[str]:
     if os.environ.get("HARNESS_SKIP_LANGUAGE_SKILLS") == "1":
         return []
@@ -3125,6 +3193,9 @@ def cmd_init(_args: argparse.Namespace) -> None:
     ensure_gitignore()
     print("initialized harness")
     print_harness_version_change(previous_version)
+    installed_local = install_local_skills()
+    if installed_local:
+        print(f"installed local skills: {', '.join(installed_local)}")
     installed = install_language_skills()
     if installed:
         print(f"installed language skills: {', '.join(installed)}")
@@ -3162,6 +3233,9 @@ def sync_target_guardrails(force: bool = False) -> None:
         print_synced_guardrails(overwrite_guardrails())
         print_harness_version_change(previous_version)
         print("target guardrails synced")
+        installed_local = install_local_skills(force=True)
+        if installed_local:
+            print(f"installed/refreshed local skills: {', '.join(installed_local)}")
         installed = install_language_skills(force=True)
         if installed:
             print(f"installed/refreshed language skills: {', '.join(installed)}")
