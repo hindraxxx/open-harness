@@ -40,6 +40,7 @@ class HarnessCliTest(unittest.TestCase):
         command_env.pop("LINEAR_TEAM_ID", None)
         command_env.pop("LINEAR_PROJECT_ID", None)
         command_env["HARNESS_SKIP_LANGUAGE_SKILLS"] = "1"
+        command_env["HARNESS_AUTO_SERVE"] = "0"
         if env:
             command_env.update(env)
         old_cwd = Path.cwd()
@@ -82,6 +83,7 @@ class HarnessCliTest(unittest.TestCase):
     ) -> subprocess.CompletedProcess:
         command_env = os.environ.copy()
         command_env["HARNESS_SKIP_LANGUAGE_SKILLS"] = "1"
+        command_env["HARNESS_AUTO_SERVE"] = "0"
         result = subprocess.run(
             [str(cli), *args],
             cwd=cwd,
@@ -2536,6 +2538,83 @@ class HarnessCliTest(unittest.TestCase):
                 self.assertEqual(len(self.harness_module.load_annotations(session_id)), 1)
             finally:
                 os.chdir(old_cwd)
+
+
+    def test_running_serve_detects_dead_pid(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            session_id = self.start_session(cwd)
+            old_cwd = Path.cwd()
+            try:
+                os.chdir(cwd)
+                state_path = self.harness_module.serve_state_path(session_id)
+                state_path.write_text(json.dumps({"pid": 2147480000, "port": 1, "url": "http://127.0.0.1:1/"}))
+                self.assertIsNone(self.harness_module.running_serve(session_id))
+                self.assertFalse(state_path.exists())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_auto_serve_respects_env_optout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            session_id = self.start_session(cwd)
+            artifact = cwd / ".harness" / "sessions" / session_id / "artifact.md"
+            artifact.write_text(self.with_guidance(self.fill_planning(artifact.read_text())))
+            self.run_cli(cwd, "transition", session_id, "planning")
+            # run_cli sets HARNESS_AUTO_SERVE=0, so a passing planning validate must not fork/serve.
+            result = self.run_cli(cwd, "validate", session_id)
+            self.assertIn("valid", result.stdout)
+            self.assertFalse((cwd / ".harness" / "sessions" / session_id / ".serve.json").exists())
+
+    def test_start_background_serve_round_trip(self):
+        if not hasattr(os, "fork"):
+            self.skipTest("os.fork unavailable")
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            session_id = self.start_session(cwd)
+            old_cwd = Path.cwd()
+            import urllib.request
+            import time
+
+            state = None
+            try:
+                os.chdir(cwd)
+                state = self.harness_module.start_background_serve(session_id)
+                self.assertIsNotNone(state)
+                base = state["url"].rstrip("/")
+                # server responds
+                deadline = time.time() + 5
+                page = None
+                while time.time() < deadline:
+                    try:
+                        page = urllib.request.urlopen(base + "/").read().decode()
+                        break
+                    except Exception:
+                        time.sleep(0.05)
+                self.assertIsNotNone(page)
+                self.assertIn("hx-toolbar", page)
+                # dedup: running_serve reports the same live process
+                self.assertEqual(self.harness_module.running_serve(session_id)["pid"], state["pid"])
+                # Complete button -> shutdown
+                urllib.request.urlopen(urllib.request.Request(base + "/shutdown", data=b"{}", method="POST"))
+                os.waitpid(state["pid"], 0)
+                self.assertFalse((cwd / ".harness" / "sessions" / session_id / ".serve.json").exists())
+                state = None
+            finally:
+                if state and state.get("pid"):
+                    try:
+                        os.kill(state["pid"], 9)
+                        os.waitpid(state["pid"], 0)
+                    except OSError:
+                        pass
+                os.chdir(old_cwd)
+
+    def fill_planning(self, text: str) -> str:
+        text = text.replace("## Requirement Summary\n\nTBD", "## Requirement Summary\n\nShip the feature.")
+        text = text.replace("- [ ] TBD", "- [x] Acceptance exists", 1)
+        text = text.replace("- [ ] TBD", "- [x] Run validation", 1)
+        text = text.replace("- [ ] TBD", "- [x] Implementation complete", 1)
+        return text
 
 
 if __name__ == "__main__":

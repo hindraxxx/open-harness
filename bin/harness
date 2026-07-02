@@ -4060,6 +4060,7 @@ def cmd_validate(args: argparse.Namespace) -> None:
         raise SystemExit(1)
     render_artifact_html(args.session_id)
     print("valid")
+    maybe_auto_serve_planning(args.session_id)
 
 
 def cmd_preflight_edit(args: argparse.Namespace) -> None:
@@ -4625,19 +4626,92 @@ def make_annotation_handler(session_id: str):
     return AnnotationHandler
 
 
+def serve_state_path(session_id: str) -> Path:
+    return sessions_dir() / session_id / ".serve.json"
+
+
+def running_serve(session_id: str) -> dict | None:
+    """Return metadata for a live background serve process, or None."""
+    path = serve_state_path(session_id)
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+    pid = data.get("pid")
+    if not pid:
+        return None
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        path.unlink(missing_ok=True)
+        return None
+    except PermissionError:
+        return data  # process exists but is not ours
+    except OSError:
+        return None
+    return data
+
+
+def start_background_serve(session_id: str) -> dict | None:
+    """Fork a detached annotation server. Returns its metadata, or None if unsupported."""
+    if not hasattr(os, "fork"):
+        return None
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_annotation_handler(session_id))
+    port = server.server_address[1]
+    url = f"http://127.0.0.1:{port}/"
+    pid = os.fork()
+    if pid > 0:
+        # Parent: hand ownership of the socket to the child and record the process.
+        server.socket.close()
+        state = {"pid": pid, "port": port, "url": url, "started_at": now()}
+        serve_state_path(session_id).parent.mkdir(parents=True, exist_ok=True)
+        serve_state_path(session_id).write_text(json.dumps(state) + "\n")
+        return state
+    # Child: detach from the controlling terminal and its stdio so the caller
+    # (and any capturing pipe) returns immediately, then serve until shutdown.
+    try:
+        os.setsid()
+    except OSError:
+        pass
+    devnull = os.open(os.devnull, os.O_RDWR)
+    for fd in (0, 1, 2):
+        os.dup2(devnull, fd)
+    try:
+        server.serve_forever()
+    except Exception:
+        pass
+    finally:
+        server.server_close()
+        serve_state_path(session_id).unlink(missing_ok=True)
+    os._exit(0)
+
+
 def cmd_serve(args: argparse.Namespace) -> None:
     current_state(args.session_id)  # validates the session exists
     if not artifact_path(args.session_id).exists():
         die(f"artifact not found for session: {args.session_id}")
+    if getattr(args, "detach", False):
+        existing = running_serve(args.session_id)
+        if existing:
+            print(f"Already serving {args.session_id} at {existing['url']} (pid {existing['pid']})")
+            _open_browser(existing["url"])
+            return
+        state = start_background_serve(args.session_id)
+        if state is None:
+            print("Background serve is not supported on this platform; serving in the foreground.")
+        else:
+            print(f"Serving annotation view for {args.session_id} at {state['url']} (background pid {state['pid']})")
+            print('Add inline comments in the browser, then click "Complete" to stop the server.')
+            _open_browser(state["url"])
+            return
     server = ThreadingHTTPServer(("127.0.0.1", 0), make_annotation_handler(args.session_id))
     port = server.server_address[1]
     url = f"http://127.0.0.1:{port}/"
     print(f"Serving annotation view for {args.session_id} at {url}")
     print('Add inline comments in the browser, then click "Complete" (or press Ctrl-C) to stop.')
-    try:
-        webbrowser.open(url)
-    except Exception:
-        pass
+    _open_browser(url)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -4646,6 +4720,36 @@ def cmd_serve(args: argparse.Namespace) -> None:
         server.server_close()
     open_count = sum(1 for a in load_annotations(args.session_id) if a.get("status") != "addressed")
     print(f"Stopped. {open_count} open annotation(s) saved to {annotations_path(args.session_id)}")
+
+
+def _open_browser(url: str) -> None:
+    try:
+        webbrowser.open(url)
+    except Exception:
+        pass
+
+
+def maybe_auto_serve_planning(session_id: str) -> None:
+    """After a passing planning validation, open the plan for inline review in the background."""
+    if os.environ.get("HARNESS_AUTO_SERVE", "1").strip().lower() in {"0", "false", "no", "off", ""}:
+        return
+    if not hasattr(os, "fork"):
+        return
+    try:
+        if current_state(session_id) != "planning":
+            return
+    except SystemExit:
+        return
+    existing = running_serve(session_id)
+    if existing:
+        print(f"Plan review already open at {existing['url']} — add comments, then ask me to check them.")
+        return
+    state = start_background_serve(session_id)
+    if not state:
+        return
+    print(f"Opened the plan for inline review at {state['url']} (background pid {state['pid']}).")
+    print("Add inline comments in your browser, then ask me to check your inline comments.")
+    _open_browser(state["url"])
 
 
 def artifact_sections(body: str) -> list[dict]:
@@ -4964,6 +5068,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     serve_p = sub.add_parser("serve")
     serve_p.add_argument("session_id")
+    serve_p.add_argument("-d", "--detach", action="store_true", help="run the server in the background and return immediately")
     serve_p.set_defaults(func=cmd_serve)
 
     annotations_p = sub.add_parser("annotations")

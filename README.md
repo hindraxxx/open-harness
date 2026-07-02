@@ -92,11 +92,20 @@ HTML artifacts regenerate when you run commands such as `harness status <session
 
 During `planning`, a human can comment directly on the rendered plan and have the agent apply the comments — all in the same session.
 
+A passing planning validation opens the plan for review automatically:
+
 ```bash
-harness serve <session-id>
+harness validate <session-id>   # when it passes in planning, auto-opens the plan in your browser
 ```
 
-This starts a lightweight local server on a random free loopback port and opens the rendered `artifact.html` in your default browser with an annotation layer. Select any text in the plan, add a comment, and click **Complete** (or press Ctrl-C) to stop the server. Comments are saved to `.harness/sessions/<session-id>/annotations.json` (git-ignored) and survive artifact regeneration.
+This starts a lightweight local server on a random free loopback port (in the background, so `validate` does not block) and opens the rendered `artifact.html` in your default browser with an annotation layer. You can also open it yourself at any time:
+
+```bash
+harness serve <session-id> -d    # background: opens the browser and returns immediately
+harness serve <session-id>       # foreground: hold the terminal until you stop it
+```
+
+Select any text in the plan, add a comment, and click **Complete** (or press Ctrl-C in foreground mode) to stop the server. Comments are saved to `.harness/sessions/<session-id>/annotations.json` (git-ignored) and survive artifact regeneration. Set `HARNESS_AUTO_SERVE=0` to disable the automatic open on validate.
 
 Then, in the same planning chat, tell the agent to check your inline comments. The agent reads them with:
 
