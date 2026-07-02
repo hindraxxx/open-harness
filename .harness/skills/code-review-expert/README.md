@@ -50,12 +50,25 @@ The skill will automatically review your current git changes.
 
 ```
 code-review-expert/
-├── SKILL.md
+├── SKILL.md                 # Main skill definition
 ├── agents/
-│   └── agent.yaml
+│   └── agent.yaml           # Agent interface config
 └── references/
-    ├── solid-checklist.md
-    ├── security-checklist.md
-    ├── code-quality-checklist.md
-    └── removal-plan.md
+    ├── solid-checklist.md   # SOLID smell prompts
+    ├── security-checklist.md    # Security & reliability
+    ├── code-quality-checklist.md # Error, perf, boundaries
+    └── removal-plan.md      # Deletion planning template
 ```
+
+## References
+
+Each checklist provides detailed prompts and anti-patterns:
+
+- **solid-checklist.md** - SOLID violations + common code smells
+- **security-checklist.md** - OWASP risks, race conditions, crypto, supply chain
+- **code-quality-checklist.md** - Error handling, caching, N+1, null safety
+- **removal-plan.md** - Safe vs deferred deletion with rollback plans
+
+## License
+
+MIT

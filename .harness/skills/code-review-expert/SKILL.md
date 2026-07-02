@@ -141,3 +141,16 @@ I found X issues (P0: _, P1: _, P2: _, P3: _).
 
 Please choose an option or provide specific instructions.
 ```
+
+**Important**: Do NOT implement any changes until user explicitly confirms. This is a review-first workflow.
+
+## Resources
+
+### references/
+
+| File | Purpose |
+|------|---------|
+| `solid-checklist.md` | SOLID smell prompts and refactor heuristics |
+| `security-checklist.md` | Web/app security and runtime risk checklist |
+| `code-quality-checklist.md` | Error handling, performance, boundary conditions |
+| `removal-plan.md` | Template for deletion candidates and follow-up plan |

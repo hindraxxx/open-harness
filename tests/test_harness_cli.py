@@ -1957,9 +1957,9 @@ class HarnessCliTest(unittest.TestCase):
                 mirror_path = cwd / mirror / "skills" / "code-review-expert"
                 self.assertTrue(mirror_path.is_symlink(), mirror_path)
                 self.assertEqual(skill_dir.resolve(), mirror_path.resolve())
-            opencode_path = cwd / "skills" / "code-review-expert"
-            self.assertTrue(opencode_path.is_symlink())
-            self.assertEqual(skill_dir.resolve(), opencode_path.resolve())
+            project_skill_path = cwd / "skills" / "code-review-expert"
+            self.assertTrue(project_skill_path.is_symlink())
+            self.assertEqual(skill_dir.resolve(), project_skill_path.resolve())
 
     def test_init_appends_to_existing_project_skills_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
