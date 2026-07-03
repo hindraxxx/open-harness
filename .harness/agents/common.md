@@ -84,3 +84,14 @@ harness recover <session-id> --reason "what failed"
 This increments `recovery_attempts` and transitions to `needs-fix`. After 3 recovery attempts, the next recovery request transitions to `blocked` and stops automation.
 Recovering from `review`, `quality-check`, or `approval` clears prior review approval and resets `## Review > Human Review` to `TBD`.
 Recovering from `quality-check` or `approval` also clears quality approval, resets `## Final Approval` to `TBD`, and removes stale quality commands/proof/manual validation from the active gate.
+
+## Sub-Agent Orchestration
+
+- The main session is the orchestrator: it plans, delegates, routes verdicts, and verifies. It must not do broad exploration, product-code implementation, or code review inline when the role sub-agents are available.
+- Runtime awareness: detect the current CLI. In Claude Code, spawn sub-agents via the Agent tool with subagent_type `code-explorer`, `implementer`, or `code-reviewer` (defined in `~/.claude/agents/*.md`). In Codex, spawn the same-named agents (defined in `~/.codex/agents/*.toml`). If the current runtime has none of these agents defined, state that in the response and perform the role inline — do not silently skip the workflow.
+- Role-to-state mapping:
+  - `planning`: fan out `code-explorer` (read-only, condensed reports, parallel for independent areas) before filling the planning artifact. The orchestrator constructs the plan itself; planning is never delegated. Orchestrator may do single-file targeted lookups; any multi-file sweep goes to `code-explorer`.
+  - `implementation` / `needs-fix`: delegate code + unit tests + validation to `implementer` per checklist slice; it must return green test output.
+  - `review`: delegate the AI review to `code-reviewer` (reviews the actual git diff; uses the code-review-expert skill). Route the verdict: APPROVE proceeds; REQUEST_CHANGES or P0/P1 findings loop back to `implementer`, then re-review until approved. P2/P3-only findings: fix via `implementer` or explicitly defer with a note.
+  - `quality-check`: delegate the quality/cleanup pass (simplification, dead code, naming, consistency) and validation-command runs to `implementer`; re-review with `code-reviewer` only if the cleanup was non-trivial.
+- Hard rules: `code-explorer` never edits; `implementer` never self-approves; `code-reviewer` never fixes. The orchestrator edits product code directly only for trivial mechanical fixes, and still only in `implementation` or `needs-fix` per the Edit Gate. Pass condensed context (explorer reports, review findings) between sub-agents explicitly — they do not share memory. Sub-agent delegation never bypasses harness gates: preflight-edit, validate, and transitions still run in the orchestrator.

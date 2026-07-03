@@ -22,7 +22,7 @@ from pathlib import Path
 
 
 MAX_RECOVERY_ATTEMPTS = 3
-HARNESS_VERSION = "2026.07.03.1"
+HARNESS_VERSION = "2026.07.03.4"
 
 LANGUAGE_SKILLS = [
     {"name": "java-springboot", "url": "https://raw.githubusercontent.com/github/awesome-copilot/main/skills/java-springboot/SKILL.md"},
@@ -731,12 +731,13 @@ canonical rule set; this file is the entry checklist.
 5. Read `.harness/project/index.md` if present.
 6. Read the state-specific guardrail file printed by `harness status`.
 7. Follow the state guardrails strictly.
-8. Before editing product code, run `harness preflight-edit <session-id>`.
-9. Edit product code only when preflight exits 0.
-10. Run `harness validate <session-id>` before every transition, then use
+8. Follow the Sub-Agent Orchestration rules in `.harness/agents/common.md`: delegate exploration to `code-explorer`, implementation/tests to `implementer`, review to `code-reviewer` when the runtime defines them.
+9. Before editing product code, run `harness preflight-edit <session-id>`.
+10. Edit product code only when preflight exits 0.
+11. Run `harness validate <session-id>` before every transition, then use
    `harness transition` for phase changes.
-11. Never bypass transition guards by editing artifact status manually.
-12. Never write `.env` secrets into artifacts, logs, comments, or proof files.
+12. Never bypass transition guards by editing artifact status manually.
+13. Never write `.env` secrets into artifacts, logs, comments, or proof files.
 
 Project map rule: `.harness/project/` is orientation only. Current code wins; verify relevant facts before planning or editing.
 
@@ -2719,6 +2720,45 @@ def install_language_skills(force: bool = False) -> list[str]:
     return installed
 
 
+_USER_SUBAGENT_FILES = [
+    ("claude", "code-explorer.md"),
+    ("claude", "implementer.md"),
+    ("claude", "code-reviewer.md"),
+    ("codex", "code-explorer.toml"),
+    ("codex", "implementer.toml"),
+    ("codex", "code-reviewer.toml"),
+]
+
+
+def install_user_subagents() -> list[str]:
+    if os.environ.get("HARNESS_SKIP_USER_SUBAGENTS") == "1":
+        return []
+    bundle_root = harness_source_root() / ".harness" / "subagents"
+    missing = [
+        f"{cli}/{fname}"
+        for cli, fname in _USER_SUBAGENT_FILES
+        if not (bundle_root / cli / fname).exists()
+    ]
+    if missing:
+        die(
+            "bundled sub-agent definitions not found; expected:\n"
+            + "\n".join(f"  .harness/subagents/{m}" for m in missing)
+        )
+    target_dirs = {
+        "claude": Path.home() / ".claude" / "agents",
+        "codex": Path.home() / ".codex" / "agents",
+    }
+    for d in target_dirs.values():
+        d.mkdir(parents=True, exist_ok=True)
+    created = []
+    for cli, fname in _USER_SUBAGENT_FILES:
+        src = bundle_root / cli / fname
+        dst = target_dirs[cli] / fname
+        if write_new(dst, src.read_text()):
+            created.append(f"{cli}/{fname}")
+    return created
+
+
 def cmd_init(_args: argparse.Namespace) -> None:
     previous_version = read_harness_version()
     harness_dir().mkdir(exist_ok=True)
@@ -2745,6 +2785,9 @@ def cmd_init(_args: argparse.Namespace) -> None:
     installed = install_language_skills()
     if installed:
         print(f"installed language skills: {', '.join(installed)}")
+    installed_subagents = install_user_subagents()
+    if installed_subagents:
+        print(f"installed user sub-agents: {', '.join(installed_subagents)}")
 
 
 def print_project_map_result(message: str, written: list[Path]) -> None:
@@ -2785,10 +2828,16 @@ def sync_target_guardrails(force: bool = False) -> None:
         installed = install_language_skills(force=True)
         if installed:
             print(f"installed/refreshed language skills: {', '.join(installed)}")
+        installed_subagents = install_user_subagents()
+        if installed_subagents:
+            print(f"installed user sub-agents: {', '.join(installed_subagents)}")
     else:
         ensure_claude_symlink()
         print("target guardrails current")
         print_harness_version_change(previous_version)
+        installed_subagents = install_user_subagents()
+        if installed_subagents:
+            print(f"installed user sub-agents: {', '.join(installed_subagents)}")
 
 
 def cmd_sync_guardrails(args: argparse.Namespace) -> None:

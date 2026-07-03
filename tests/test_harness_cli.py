@@ -40,6 +40,7 @@ class HarnessCliTest(unittest.TestCase):
         command_env.pop("LINEAR_TEAM_ID", None)
         command_env.pop("LINEAR_PROJECT_ID", None)
         command_env["HARNESS_SKIP_LANGUAGE_SKILLS"] = "1"
+        command_env["HARNESS_SKIP_USER_SUBAGENTS"] = "1"
         command_env["HARNESS_AUTO_SERVE"] = "0"
         if env:
             command_env.update(env)
@@ -83,6 +84,7 @@ class HarnessCliTest(unittest.TestCase):
     ) -> subprocess.CompletedProcess:
         command_env = os.environ.copy()
         command_env["HARNESS_SKIP_LANGUAGE_SKILLS"] = "1"
+        command_env["HARNESS_SKIP_USER_SUBAGENTS"] = "1"
         command_env["HARNESS_AUTO_SERVE"] = "0"
         result = subprocess.run(
             [str(cli), *args],
@@ -310,6 +312,23 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn(".env", (cwd / ".gitignore").read_text().splitlines())
             self.assertEqual(self.harness_module.HARNESS_VERSION, (cwd / ".harness" / "version").read_text().strip())
             self.assertIn(f"harness version: none -> {self.harness_module.HARNESS_VERSION}", result.stdout)
+
+    def test_init_installs_sub_agent_orchestration_in_common_md(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            common_md = (cwd / ".harness" / "agents" / "common.md").read_text()
+            self.assertIn("## Sub-Agent Orchestration", common_md)
+            self.assertIn("code-explorer", common_md)
+            self.assertIn("implementer", common_md)
+            self.assertIn("code-reviewer", common_md)
+
+    def test_init_installs_sub_agent_orchestration_in_agents_md(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            agents_md = (cwd / "AGENTS.md").read_text()
+            self.assertIn("Sub-Agent Orchestration", agents_md)
 
     def test_start_uses_local_session_id_and_sqlite_state(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2698,6 +2717,138 @@ class HarnessCliTest(unittest.TestCase):
         text = text.replace("- [ ] TBD", "- [x] Run validation", 1)
         text = text.replace("- [ ] TBD", "- [x] Implementation complete", 1)
         return text
+
+
+class TestInstallUserSubagents(unittest.TestCase):
+    """Tests for install_user_subagents() and its integration with init/update."""
+
+    def _run_harness(self, cwd: Path, args: list[str], fake_home: Path, extra_env: Optional[dict] = None) -> subprocess.CompletedProcess:
+        env = os.environ.copy()
+        env["HARNESS_SKIP_LANGUAGE_SKILLS"] = "1"
+        env["HARNESS_AUTO_SERVE"] = "0"
+        env["HOME"] = str(fake_home)
+        env.pop("HARNESS_SKIP_USER_SUBAGENTS", None)
+        if extra_env:
+            env.update(extra_env)
+        return subprocess.run(
+            [sys.executable, str(CLI), *args],
+            cwd=str(cwd),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+        )
+
+    def test_init_installs_user_subagents(self):
+        """init creates all six sub-agent files in a fresh HOME."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            fake_home = tmp / "home"
+            fake_home.mkdir()
+            project = tmp / "project"
+            project.mkdir()
+            result = self._run_harness(project, ["init"], fake_home)
+            self.assertEqual(result.returncode, 0, f"init failed: {result.stderr}")
+
+            claude_agents = fake_home / ".claude" / "agents"
+            codex_agents = fake_home / ".codex" / "agents"
+
+            for name, marker in [
+                ("code-explorer.md", "name: code-explorer"),
+                ("implementer.md", "name: implementer"),
+                ("code-reviewer.md", "name: code-reviewer"),
+            ]:
+                path = claude_agents / name
+                self.assertTrue(path.exists(), f"missing {path}")
+                self.assertIn(marker, path.read_text())
+
+            for name, marker in [
+                ("code-explorer.toml", 'name = "code-explorer"'),
+                ("implementer.toml", 'name = "implementer"'),
+                ("code-reviewer.toml", 'name = "code-reviewer"'),
+            ]:
+                path = codex_agents / name
+                self.assertTrue(path.exists(), f"missing {path}")
+                self.assertIn(marker, path.read_text())
+
+            self.assertIn("installed user sub-agents:", result.stdout)
+
+    def test_init_does_not_overwrite_user_subagents(self):
+        """init preserves existing sub-agent files and creates the missing ones."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            fake_home = tmp / "home"
+            fake_home.mkdir()
+            claude_agents = fake_home / ".claude" / "agents"
+            claude_agents.mkdir(parents=True)
+            sentinel_content = "SENTINEL_DO_NOT_OVERWRITE"
+            (claude_agents / "implementer.md").write_text(sentinel_content)
+
+            project = tmp / "project"
+            project.mkdir()
+            result = self._run_harness(project, ["init"], fake_home)
+            self.assertEqual(result.returncode, 0, f"init failed: {result.stderr}")
+
+            # Sentinel preserved
+            self.assertEqual((claude_agents / "implementer.md").read_text(), sentinel_content)
+
+            # Other five files created
+            codex_agents = fake_home / ".codex" / "agents"
+            for name in ["code-explorer.md", "code-reviewer.md"]:
+                self.assertTrue((claude_agents / name).exists(), f"missing claude/{name}")
+            for name in ["code-explorer.toml", "implementer.toml", "code-reviewer.toml"]:
+                self.assertTrue((codex_agents / name).exists(), f"missing codex/{name}")
+
+    def test_update_installs_missing_user_subagents(self):
+        """harness update --skip-pull creates missing sub-agents in a fresh HOME."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            fake_home = tmp / "home"
+            fake_home.mkdir()
+            project = tmp / "project"
+            project.mkdir()
+            # init first so .harness dir exists (update needs it)
+            init_result = self._run_harness(
+                project, ["init"], fake_home,
+                extra_env={"HARNESS_SKIP_USER_SUBAGENTS": "1"},
+            )
+            self.assertEqual(init_result.returncode, 0, f"init failed: {init_result.stderr}")
+            # Remove any subagents that might have leaked (shouldn't with skip gate)
+            import shutil as _shutil
+            claude_agents = fake_home / ".claude" / "agents"
+            codex_agents = fake_home / ".codex" / "agents"
+            for d in [claude_agents, codex_agents]:
+                if d.exists():
+                    _shutil.rmtree(d)
+
+            update_result = self._run_harness(project, ["update", "--skip-pull"], fake_home)
+            self.assertEqual(update_result.returncode, 0, f"update failed: {update_result.stderr}")
+
+            for name in ["code-explorer.md", "implementer.md", "code-reviewer.md"]:
+                self.assertTrue((claude_agents / name).exists(), f"missing claude/{name}")
+            for name in ["code-explorer.toml", "implementer.toml", "code-reviewer.toml"]:
+                self.assertTrue((codex_agents / name).exists(), f"missing codex/{name}")
+
+    def test_skip_user_subagents_env_gate(self):
+        """HARNESS_SKIP_USER_SUBAGENTS=1 prevents any sub-agent files from being created."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            fake_home = tmp / "home"
+            fake_home.mkdir()
+            project = tmp / "project"
+            project.mkdir()
+            result = self._run_harness(
+                project, ["init"], fake_home,
+                extra_env={"HARNESS_SKIP_USER_SUBAGENTS": "1"},
+            )
+            self.assertEqual(result.returncode, 0, f"init failed: {result.stderr}")
+
+            claude_agents = fake_home / ".claude" / "agents"
+            codex_agents = fake_home / ".codex" / "agents"
+            for name in ["code-explorer.md", "implementer.md", "code-reviewer.md"]:
+                self.assertFalse((claude_agents / name).exists(), f"should not exist: claude/{name}")
+            for name in ["code-explorer.toml", "implementer.toml", "code-reviewer.toml"]:
+                self.assertFalse((codex_agents / name).exists(), f"should not exist: codex/{name}")
 
 
 if __name__ == "__main__":
