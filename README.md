@@ -115,7 +115,7 @@ harness annotations <session-id> --all      # include comments already addressed
 harness annotations <session-id> --resolve <annotation-id>   # mark one addressed
 ```
 
-The agent applies each comment by editing `artifact.md`, marks it addressed, and you can re-run `harness serve` for another pass — only new comments surface. Inline annotations refine the plan only: they never move the workflow state, never become Required Fixes, and never authorize code edits.
+The agent applies each comment by editing `artifact.md`, then marks it addressed. After the last open annotation in the batch is resolved, harness regenerates `artifact.html` and reopens the planning annotation view for another pass unless `HARNESS_AUTO_SERVE=0` is set. Only new comments surface. Inline annotations refine the plan only: they never move the workflow state, never become Required Fixes, and never authorize code edits.
 
 ## Update The CLI
 
