@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="720" viewBox="0 0 1180 720" role="img" aria-labelledby="title desc">
+  <title id="title">Harness workflow</title>
+  <desc id="desc">A compact flow diagram showing harness session states from start through planning, implementation, review, quality-check, approval, and done, with recovery through needs-fix and blocked.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#334155"/>
+    </marker>
+    <style>
+      .bg { fill: #f8fafc; }
+      .lane { fill: #ffffff; stroke: #d8dee8; stroke-width: 1.2; }
+      .node { fill: #f1f5f9; stroke: #64748b; stroke-width: 1.4; }
+      .gate { fill: #ecfeff; stroke: #0891b2; stroke-width: 1.4; }
+      .final { fill: #ecfdf5; stroke: #059669; stroke-width: 1.4; }
+      .fix { fill: #fff7ed; stroke: #ea580c; stroke-width: 1.4; }
+      .blocked { fill: #fef2f2; stroke: #dc2626; stroke-width: 1.4; }
+      .line { fill: none; stroke: #334155; stroke-width: 1.8; marker-end: url(#arrow); }
+      .soft-line { fill: none; stroke: #64748b; stroke-width: 1.5; stroke-dasharray: 6 5; marker-end: url(#arrow); }
+      .title { font: 700 28px Arial, sans-serif; fill: #0f172a; }
+      .subtitle { font: 400 14px Arial, sans-serif; fill: #475569; }
+      .label { font: 700 15px Arial, sans-serif; fill: #0f172a; }
+      .small { font: 400 12px Arial, sans-serif; fill: #334155; }
+      .tiny { font: 400 11px Arial, sans-serif; fill: #475569; }
+      .edge-label { font: 700 12px Arial, sans-serif; fill: #9a3412; }
+    </style>
+  </defs>
+
+  <rect class="bg" width="1180" height="720" rx="18"/>
+  <text class="title" x="44" y="52">Harness Session Workflow</text>
+  <text class="subtitle" x="44" y="78">The artifact drives the state machine; each gate validates required sections before the next phase.</text>
+
+  <rect class="lane" x="34" y="106" width="1112" height="210" rx="10"/>
+  <rect class="lane" x="34" y="342" width="1112" height="160" rx="10"/>
+  <rect class="lane" x="34" y="528" width="1112" height="130" rx="10"/>
+
+  <text class="tiny" x="54" y="132">MAIN FLOW</text>
+  <text class="tiny" x="54" y="368">RECOVERY</text>
+  <text class="tiny" x="54" y="554">BLOCKED ESCAPE PATHS</text>
+
+  <rect class="node" x="58" y="166" width="120" height="70" rx="9"/>
+  <text class="label" x="92" y="196">start</text>
+  <text class="small" x="77" y="218">session created</text>
+
+  <rect class="gate" x="226" y="148" width="150" height="106" rx="9"/>
+  <text class="label" x="265" y="178">planning</text>
+  <text class="small" x="248" y="202">fill artifact</text>
+  <text class="small" x="252" y="220">validate plan</text>
+  <text class="small" x="246" y="238">approve-plan</text>
+
+  <rect class="node" x="424" y="148" width="166" height="106" rx="9"/>
+  <text class="label" x="459" y="178">implementation</text>
+  <text class="small" x="449" y="202">preflight-edit</text>
+  <text class="small" x="450" y="220">code and tests</text>
+  <text class="small" x="449" y="238">check checklist</text>
+
+  <rect class="node" x="638" y="148" width="132" height="106" rx="9"/>
+  <text class="label" x="682" y="178">review</text>
+  <text class="small" x="664" y="202">record review</text>
+  <text class="small" x="659" y="220">required fixes</text>
+  <text class="small" x="662" y="238">approve-review</text>
+
+  <rect class="node" x="818" y="148" width="152" height="106" rx="9"/>
+  <text class="label" x="846" y="178">quality-check</text>
+  <text class="small" x="848" y="202">run validation</text>
+  <text class="small" x="844" y="220">record results</text>
+  <text class="small" x="862" y="238">attach proof</text>
+
+  <rect class="gate" x="1018" y="148" width="102" height="106" rx="9"/>
+  <text class="label" x="1041" y="178">approval</text>
+  <text class="small" x="1038" y="205">approve</text>
+  <text class="small" x="1042" y="223">quality</text>
+
+  <rect class="final" x="1018" y="278" width="102" height="56" rx="9"/>
+  <text class="label" x="1051" y="312">done</text>
+
+  <path class="line" d="M178 201 H220"/>
+  <path class="line" d="M376 201 H418"/>
+  <path class="line" d="M590 201 H632"/>
+  <path class="line" d="M770 201 H812"/>
+  <path class="line" d="M970 201 H1012"/>
+  <path class="line" d="M1069 254 V272"/>
+
+  <rect class="fix" x="466" y="388" width="154" height="82" rx="9"/>
+  <text class="label" x="510" y="420">needs-fix</text>
+  <text class="small" x="494" y="444">recover, fix issue</text>
+
+  <path class="soft-line" d="M507 254 V382"/>
+  <text class="edge-label" x="520" y="326">fail / issue</text>
+  <path class="soft-line" d="M704 254 C704 318 625 326 577 383"/>
+  <text class="edge-label" x="646" y="326">fix needed</text>
+  <path class="soft-line" d="M894 254 C894 350 700 348 600 391"/>
+  <text class="edge-label" x="787" y="328">validation fail</text>
+  <path class="line" d="M466 429 C408 429 396 257 424 238"/>
+
+  <rect class="blocked" x="198" y="568" width="148" height="62" rx="9"/>
+  <text class="label" x="241" y="594">blocked</text>
+  <text class="small" x="223" y="616">too many recoveries</text>
+
+  <path class="soft-line" d="M466 451 C350 476 286 498 272 562"/>
+  <text class="edge-label" x="316" y="506">too many recoveries</text>
+  <path class="soft-line" d="M272 568 C240 484 230 330 286 255"/>
+  <path class="soft-line" d="M346 600 C445 594 499 358 504 256"/>
+  <path class="soft-line" d="M346 612 C640 644 881 414 890 256"/>
+  <path class="soft-line" d="M346 624 C768 696 1045 457 1064 256"/>
+
+  <text class="tiny" x="386" y="590">blocked can return to planning, implementation, quality-check, approval, or done after a human decision</text>
+
+  <rect class="lane" x="58" y="276" width="378" height="30" rx="6"/>
+  <text class="tiny" x="76" y="295">artifact.md records approvals, checklist state, review, validation output, and proof links</text>
+</svg>

@@ -88,6 +88,30 @@ harness history <session-id>
 
 HTML artifacts regenerate when you run commands such as `harness status <session-id>` or a passing `harness validate <session-id>`.
 
+## Workflow Flow
+
+![Harness workflow](docs/harness-workflow.svg)
+
+Compact state flow:
+
+```text
+start
+  -> planning
+      fill/validate/approve plan
+  -> implementation
+      preflight-edit, code/test changes, checklist
+  -> review
+      AI/human review, required fixes, approval
+  -> quality-check
+      run validation, attach proof
+  -> approval
+      human quality approval
+  -> done
+
+Failures from implementation/review/quality-check go to needs-fix,
+then back to implementation. Too many recoveries go to blocked.
+```
+
 ## Annotate A Plan Inline
 
 During `planning`, a human can comment directly on the rendered plan and have the agent apply the comments — all in the same session.
