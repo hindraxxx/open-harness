@@ -12,6 +12,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from typing import Optional
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -557,6 +558,24 @@ class HarnessCliTest(unittest.TestCase):
                 "--story",
                 "story-001:Maker submits request",
             )
+            story_plan = coordinator / ".harness" / "sessions" / "epic-approval" / "children" / "story-001" / "plan.md"
+            story_plan.write_text(
+                story_plan.read_text().replace(
+                    "## Open Questions\n\n- [ ] TBD",
+                    "\n".join(
+                        [
+                            "## Code Anchors",
+                            "",
+                            "- `src/main/kotlin/App.kt` lines 10-24; compact check: `sed -n '10,24p' src/main/kotlin/App.kt`.",
+                            "- `src/test/kotlin/AppTest.kt` matcher anchor; compact check: `rg -n \"default payment\" src/test/kotlin/AppTest.kt`.",
+                            "",
+                            "## Open Questions",
+                            "",
+                            "- [ ] TBD",
+                        ]
+                    ),
+                )
+            )
 
             result = self.run_cli(
                 coordinator,
@@ -575,6 +594,8 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn('status: "planning"', target_text)
             self.assertIn("Repo-local implementation session for child story `story-001`", target_text)
             self.assertIn("This session is scoped to", target_text)
+            self.assertIn("sed -n '10,24p' src/main/kotlin/App.kt", target_text)
+            self.assertIn('rg -n "default payment" src/test/kotlin/AppTest.kt', target_text)
             with sqlite3.connect(target_repo / ".harness" / "harness.db") as conn:
                 row = conn.execute("SELECT state FROM sessions WHERE session_id = ?", ("20260630_story-001",)).fetchone()
             self.assertEqual(("planning",), row)
@@ -589,6 +610,55 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("target-repo", index_html_text)
             self.assertIn("20260630_story-001", index_html_text)
             self.assertIn((target_artifact.with_suffix(".html")).resolve().as_uri(), index_html_text)
+
+    def test_start_story_can_scope_duplicate_story_id_by_epic(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            coordinator = Path(tmp) / "coordinator"
+            target_repo = Path(tmp) / "target-repo"
+            coordinator.mkdir()
+            target_repo.mkdir()
+            self.run_cli(coordinator, "init")
+            self.run_cli(target_repo, "init")
+            for epic_id in ["older-epic", "active-epic"]:
+                self.run_cli(
+                    coordinator,
+                    "plan-epic",
+                    epic_id,
+                    "--split-stories",
+                    "--story",
+                    "story-001:Maker submits request",
+                )
+
+            ambiguous = self.run_cli(
+                coordinator,
+                "start-story",
+                "story-001",
+                "--repo",
+                str(target_repo),
+                "--session-id",
+                "20260630_story-001",
+                check=False,
+            )
+            self.assertNotEqual(0, ambiguous.returncode)
+            self.assertIn("story id is ambiguous across epics", ambiguous.stderr)
+
+            result = self.run_cli(
+                coordinator,
+                "start-story",
+                "story-001",
+                "--epic",
+                "active-epic",
+                "--repo",
+                str(target_repo),
+                "--session-id",
+                "20260630_story-001",
+            )
+
+            self.assertIn("started story session: 20260630_story-001", result.stdout)
+            active_metadata = coordinator / ".harness" / "sessions" / "active-epic" / "children" / "story-001" / "metadata.json"
+            older_metadata = coordinator / ".harness" / "sessions" / "older-epic" / "children" / "story-001" / "metadata.json"
+            self.assertEqual("20260630_story-001", json.loads(active_metadata.read_text())["planning_session_id"])
+            self.assertEqual("", json.loads(older_metadata.read_text())["planning_session_id"])
 
     def test_link_story_connects_parent_index_to_existing_repo_session(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2490,6 +2560,43 @@ class HarnessCliTest(unittest.TestCase):
             path = cwd / ".harness" / "sessions" / session_id / "annotations.json"
             self.assertTrue(path.exists())
 
+    def test_served_annotation_page_omits_addressed_annotations(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            session_id = self.start_session(cwd)
+            old_cwd = Path.cwd()
+            try:
+                os.chdir(cwd)
+                open_annotation = self.harness_module.add_annotation(
+                    session_id,
+                    {
+                        "quote": "open-only quote",
+                        "comment": "still needs work",
+                        "section": "requirement-summary",
+                    },
+                )
+                addressed_annotation = self.harness_module.add_annotation(
+                    session_id,
+                    {
+                        "quote": "addressed-only quote",
+                        "comment": "already fixed",
+                        "section": "requirement-summary",
+                    },
+                )
+                self.harness_module.update_annotation(
+                    session_id, addressed_annotation["id"], {"status": "addressed"}
+                )
+                page = self.harness_module.build_annotation_page(session_id)
+                stored = self.harness_module.load_annotations(session_id)
+            finally:
+                os.chdir(old_cwd)
+
+            self.assertEqual(len(stored), 2)
+            self.assertIn(open_annotation["id"], page)
+            self.assertIn("open-only quote", page)
+            self.assertNotIn(addressed_annotation["id"], page)
+            self.assertNotIn("addressed-only quote", page)
+
     def test_add_annotation_requires_quote_and_comment(self):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)
@@ -2540,6 +2647,113 @@ class HarnessCliTest(unittest.TestCase):
             with_all = self.run_cli(cwd, "annotations", session_id, "--all")
             self.assertIn(annotation_id, with_all.stdout)
             self.assertIn("addressed", with_all.stdout)
+
+    def test_annotations_resolve_refreshes_html_and_auto_serves(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            session_id = self.start_session(cwd)
+            self.run_cli(cwd, "transition", session_id, "planning")
+            artifact = cwd / ".harness" / "sessions" / session_id / "artifact.md"
+            html_path = artifact.with_suffix(".html")
+            artifact.write_text(self.with_guidance(self.fill_planning(artifact.read_text())))
+            old_cwd = Path.cwd()
+            try:
+                os.chdir(cwd)
+                created = self.harness_module.add_annotation(
+                    session_id,
+                    {
+                        "quote": "Ship the feature.",
+                        "comment": "make this specific",
+                        "section": "requirement-summary",
+                    },
+                )
+            finally:
+                os.chdir(old_cwd)
+            artifact.write_text(artifact.read_text().replace("Ship the feature.", "Ship the token refresh feature."))
+
+            with mock.patch.object(self.harness_module, "start_background_serve", return_value={
+                "pid": 123,
+                "port": 456,
+                "url": "http://127.0.0.1:456/",
+                "started_at": "2026-07-03T00:00:00Z",
+            }) as start_background_serve, \
+                 mock.patch.object(self.harness_module, "_open_browser") as open_browser:
+                result = self.run_cli(
+                    cwd,
+                    "annotations",
+                    session_id,
+                    "--resolve",
+                    created["id"],
+                    env={"HARNESS_AUTO_SERVE": "1"},
+                )
+
+            self.assertIn(f"marked addressed: {created['id']}", result.stdout)
+            self.assertIn("Ship the token refresh feature.", html_path.read_text())
+            start_background_serve.assert_called_once_with(session_id)
+            open_browser.assert_called_once_with("http://127.0.0.1:456/")
+
+    def test_annotations_resolve_serves_after_batch_is_complete(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            session_id = self.start_session(cwd)
+            self.run_cli(cwd, "transition", session_id, "planning")
+            artifact = cwd / ".harness" / "sessions" / session_id / "artifact.md"
+            html_path = artifact.with_suffix(".html")
+            artifact.write_text(self.with_guidance(self.fill_planning(artifact.read_text())))
+            html_path.write_text("stale html")
+            old_cwd = Path.cwd()
+            try:
+                os.chdir(cwd)
+                first = self.harness_module.add_annotation(
+                    session_id,
+                    {
+                        "quote": "Ship the feature.",
+                        "comment": "make this specific",
+                        "section": "requirement-summary",
+                    },
+                )
+                second = self.harness_module.add_annotation(
+                    session_id,
+                    {
+                        "quote": "Acceptance exists",
+                        "comment": "include the edge case",
+                        "section": "acceptance-criteria",
+                    },
+                )
+            finally:
+                os.chdir(old_cwd)
+
+            with mock.patch.object(self.harness_module, "start_background_serve", return_value={
+                "pid": 123,
+                "port": 456,
+                "url": "http://127.0.0.1:456/",
+                "started_at": "2026-07-03T00:00:00Z",
+            }) as start_background_serve, \
+                 mock.patch.object(self.harness_module, "_open_browser") as open_browser:
+                first_result = self.run_cli(
+                    cwd,
+                    "annotations",
+                    session_id,
+                    "--resolve",
+                    first["id"],
+                    env={"HARNESS_AUTO_SERVE": "1"},
+                )
+                html_after_first_resolve = html_path.read_text()
+                second_result = self.run_cli(
+                    cwd,
+                    "annotations",
+                    session_id,
+                    "--resolve",
+                    second["id"],
+                    env={"HARNESS_AUTO_SERVE": "1"},
+                )
+
+            self.assertIn("1 open annotation(s) remain", first_result.stdout)
+            self.assertEqual("stale html", html_after_first_resolve)
+            self.assertIn(f"marked addressed: {second['id']}", second_result.stdout)
+            self.assertIn("Ship the feature.", html_path.read_text())
+            start_background_serve.assert_called_once_with(session_id)
+            open_browser.assert_called_once_with("http://127.0.0.1:456/")
 
     def test_annotations_command_flags_stale_quote(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2667,6 +2881,39 @@ class HarnessCliTest(unittest.TestCase):
             result = self.run_cli(cwd, "validate", session_id)
             self.assertIn("valid", result.stdout)
             self.assertFalse((cwd / ".harness" / "sessions" / session_id / ".serve.json").exists())
+
+    def test_auto_serve_defaults_enabled_when_env_unset(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            session_id = self.start_session(cwd)
+            artifact = cwd / ".harness" / "sessions" / session_id / "artifact.md"
+            artifact.write_text(self.with_guidance(self.fill_planning(artifact.read_text())))
+            self.run_cli(cwd, "transition", session_id, "planning")
+            old_cwd = Path.cwd()
+            try:
+                os.chdir(cwd)
+                with mock.patch.dict(os.environ, {}, clear=True), \
+                     mock.patch.object(self.harness_module, "start_background_serve", return_value={
+                         "pid": 123,
+                         "port": 456,
+                         "url": "http://127.0.0.1:456/",
+                         "started_at": "2026-07-03T00:00:00Z",
+                     }) as start_background_serve, \
+                     mock.patch.object(self.harness_module, "_open_browser") as open_browser:
+                    self.harness_module.maybe_auto_serve_planning(session_id)
+            finally:
+                os.chdir(old_cwd)
+            start_background_serve.assert_called_once_with(session_id)
+            open_browser.assert_called_once_with("http://127.0.0.1:456/")
+
+    def test_auto_serve_enabled_recognizes_false_values(self):
+        for value in ("0", "false", "no", "off", ""):
+            with self.subTest(value=value):
+                with mock.patch.dict(os.environ, {"HARNESS_AUTO_SERVE": value}):
+                    self.assertFalse(self.harness_module.auto_serve_enabled())
+
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertTrue(self.harness_module.auto_serve_enabled())
 
     def test_start_background_serve_round_trip(self):
         if not hasattr(os, "fork"):

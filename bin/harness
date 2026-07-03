@@ -22,7 +22,8 @@ from pathlib import Path
 
 
 MAX_RECOVERY_ATTEMPTS = 3
-HARNESS_VERSION = "2026.07.03.4"
+HARNESS_VERSION = "2026.07.03.10"
+AUTO_SERVE_DISABLED_VALUES = {"0", "false", "no", "off", ""}
 
 LANGUAGE_SKILLS = [
     {"name": "java-springboot", "url": "https://raw.githubusercontent.com/github/awesome-copilot/main/skills/java-springboot/SKILL.md"},
@@ -3040,7 +3041,13 @@ def load_story_metadata(path: Path) -> dict[str, object]:
     return data
 
 
-def find_story_metadata(story_id: str) -> tuple[Path, dict[str, object]]:
+def find_story_metadata(story_id: str, epic_id: str = "") -> tuple[Path, dict[str, object]]:
+    if epic_id:
+        validate_requirement_id(epic_id, "epic id")
+        path = story_metadata_path(epic_id, story_id)
+        if not path.exists():
+            die(f"story not found: {story_id} in epic {epic_id}")
+        return path, load_story_metadata(path)
     matches = []
     for path in sessions_dir().glob(f"*/children/{story_id}/metadata.json"):
         matches.append((path, load_story_metadata(path)))
@@ -3052,7 +3059,12 @@ def find_story_metadata(story_id: str) -> tuple[Path, dict[str, object]]:
     return matches[0]
 
 
-def metadata_by_story_id(story_id: str) -> dict[str, object] | None:
+def metadata_by_story_id(story_id: str, epic_id: str = "") -> dict[str, object] | None:
+    if epic_id:
+        path = story_metadata_path(epic_id, story_id)
+        if path.exists():
+            return load_story_metadata(path)
+        return None
     for path in sessions_dir().glob(f"*/children/{story_id}/metadata.json"):
         return load_story_metadata(path)
     return None
@@ -3091,6 +3103,7 @@ def story_plan_to_session_artifact(
     tests = section(plan_text, "Test Plan").strip() or "- [ ] TBD"
     target_repo_section = section(plan_text, "Target Repo").strip()
     implementation_plan = section(plan_text, "Implementation Plan").strip() or "TBD"
+    code_anchors = section(plan_text, "Code Anchors").strip()
     dependencies = section(plan_text, "Dependencies").strip() or "- [ ] TBD"
     out_of_scope = section(plan_text, "Out of Scope").strip() or "TBD"
     open_questions = section(plan_text, "Open Questions").strip() or "- [ ] TBD"
@@ -3166,7 +3179,7 @@ sequenceDiagram
 
 ### Code Anchors
 
-Use the concrete file/function anchors listed in the implementation sketch above. Re-verify every anchor against the current `{repo_note}` checkout before editing because the source child plan may have been produced from RFC-cited locations.
+{code_anchors if code_anchors else f"Use the concrete file/function anchors listed in the implementation sketch above. Re-verify every anchor against the current `{repo_note}` checkout before editing because the source child plan may have been produced from RFC-cited locations."}
 
 ### Open Questions
 
@@ -3404,7 +3417,7 @@ def cmd_split_session(args: argparse.Namespace) -> None:
 
 def cmd_start_story(args: argparse.Namespace) -> None:
     validate_requirement_id(args.story_id, "story id")
-    metadata_file, data = find_story_metadata(args.story_id)
+    metadata_file, data = find_story_metadata(args.story_id, args.epic or "")
     epic_base = metadata_file.parents[2]
     epic_id = str(data.get("epic_id", epic_base.name))
     plan_md = epic_base / str(data.get("plan_md", f"children/{args.story_id}/plan.md"))
@@ -3466,7 +3479,7 @@ def cmd_start_story(args: argparse.Namespace) -> None:
 def cmd_link_story(args: argparse.Namespace) -> None:
     validate_requirement_id(args.story_id, "story id")
     validate_requirement_id(args.session_id, "session id")
-    metadata_file, data = find_story_metadata(args.story_id)
+    metadata_file, data = find_story_metadata(args.story_id, args.epic or "")
     epic_base = metadata_file.parents[2]
     plan_md = epic_base / str(data.get("plan_md", f"children/{args.story_id}/plan.md"))
     if not plan_md.exists():
@@ -3501,7 +3514,9 @@ def cmd_link_story(args: argparse.Namespace) -> None:
 
 def cmd_implement(args: argparse.Namespace) -> None:
     validate_requirement_id(args.story_id, "story id")
-    metadata_file, data = find_story_metadata(args.story_id)
+    metadata_file, data = find_story_metadata(args.story_id, args.epic or "")
+    epic_base = metadata_file.parents[2]
+    epic_id = str(data.get("epic_id", epic_base.name))
     status = str(data.get("status", "draft"))
     if status != "ready":
         die(f"story {args.story_id} is not ready for implementation: status={status}")
@@ -3516,7 +3531,7 @@ def cmd_implement(args: argparse.Namespace) -> None:
         die(f"story {args.story_id} has invalid dependencies in {metadata_file}")
     blocked = []
     for dependency in dependencies:
-        dependency_data = metadata_by_story_id(str(dependency))
+        dependency_data = metadata_by_story_id(str(dependency), epic_id)
         if not dependency_data:
             blocked.append(f"{dependency}: missing")
         elif dependency_data.get("status") != "done":
@@ -3526,7 +3541,6 @@ def cmd_implement(args: argparse.Namespace) -> None:
         for item in blocked:
             print(f"- dependency {item}")
         raise SystemExit(1)
-    epic_base = metadata_file.parents[2]
     plan_md = epic_base / str(data.get("plan_md", f"children/{args.story_id}/plan.md"))
     plan_html = epic_base / str(data.get("plan_html", f"children/{args.story_id}/plan.html"))
     if not plan_md.exists():
@@ -4044,9 +4058,7 @@ body { padding-top: 48px !important; }
 }
 .hx-panel h3 { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: #756f66; }
 .hx-card { border: 1px solid #ddd7ce; border-radius: 8px; padding: 10px; margin-bottom: 10px; background: #fffdf8; }
-.hx-card.addressed { opacity: 0.6; }
 .hx-card .hx-badge { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: #ece8dc; color: #4f533f; }
-.hx-card.addressed .hx-badge { background: #d8f0c8; }
 .hx-card blockquote { margin: 6px 0; padding-left: 8px; border-left: 3px solid #6f725b; color: #4f533f; font-size: 12px; }
 .hx-card .hx-note { margin: 6px 0 0; }
 .hx-card .hx-del { border: 0; background: none; color: #a3524a; cursor: pointer; font-size: 12px; padding: 0; margin-top: 6px; }
@@ -4164,9 +4176,8 @@ ANNOTATION_CLIENT_JS = """
     var head = "<h3>Comments — " + open + " open</h3>";
     if (!annotations.length) { panel.innerHTML = head + "<p style='color:#756f66'>Select text in the plan to add a comment.</p>"; return; }
     panel.innerHTML = head + annotations.map(function (a) {
-      var cls = a.status === "addressed" ? "hx-card addressed" : "hx-card";
-      return "<div class='" + cls + "' data-id='" + a.id + "'>"
-        + "<span class='hx-badge'>" + (a.status === "addressed" ? "addressed" : "open") + "</span>"
+      return "<div class='hx-card' data-id='" + a.id + "'>"
+        + "<span class='hx-badge'>open</span>"
         + "<blockquote>" + escapeHtml(a.quote) + "</blockquote>"
         + "<div class='hx-note'>" + escapeHtml(a.comment) + "</div>"
         + "<button class='hx-del' data-del='" + a.id + "'>Delete</button>"
@@ -4250,7 +4261,7 @@ def build_annotation_page(session_id: str) -> str:
     if html_path is None:
         return "<!doctype html><meta charset=utf-8><p>No artifact for this session.</p>"
     document = html_path.read_text()
-    payload = json.dumps(load_annotations(session_id))
+    payload = json.dumps([a for a in load_annotations(session_id) if a.get("status") != "addressed"])
     injection = (
         "<style>" + ANNOTATION_CLIENT_CSS + "</style>"
         + "<script>window.__ANNOTATIONS__ = " + payload + ";</script>"
@@ -4433,9 +4444,13 @@ def _open_browser(url: str) -> None:
         pass
 
 
+def auto_serve_enabled() -> bool:
+    return os.environ.get("HARNESS_AUTO_SERVE", "true").strip().lower() not in AUTO_SERVE_DISABLED_VALUES
+
+
 def maybe_auto_serve_planning(session_id: str) -> None:
     """After a passing planning validation, open the plan for inline review in the background."""
-    if os.environ.get("HARNESS_AUTO_SERVE", "1").strip().lower() in {"0", "false", "no", "off", ""}:
+    if not auto_serve_enabled():
         return
     if not hasattr(os, "fork"):
         return
@@ -4499,6 +4514,12 @@ def cmd_annotations(args: argparse.Namespace) -> None:
         if updated is None:
             die(f"annotation not found: {args.resolve}")
         print(f"marked addressed: {args.resolve}")
+        open_count = sum(1 for a in load_annotations(session_id) if a.get("status") != "addressed")
+        if open_count:
+            print(f"{open_count} open annotation(s) remain; finish the batch before serving again.")
+        else:
+            render_artifact_html(session_id)
+            maybe_auto_serve_planning(session_id)
         return
     path = artifact_path(session_id)
     if not path.exists():
@@ -4688,6 +4709,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     start_story_p = sub.add_parser("start-story")
     start_story_p.add_argument("story_id")
+    start_story_p.add_argument("--epic", help="disambiguate story id by parent epic/session id")
     start_story_p.add_argument("--repo")
     start_story_p.add_argument("--session-id")
     start_story_p.add_argument("--force", action="store_true")
@@ -4695,12 +4717,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     link_story_p = sub.add_parser("link-story")
     link_story_p.add_argument("story_id")
+    link_story_p.add_argument("--epic", help="disambiguate story id by parent epic/session id")
     link_story_p.add_argument("--repo", required=True)
     link_story_p.add_argument("--session-id", required=True)
     link_story_p.set_defaults(func=cmd_link_story)
 
     implement_p = sub.add_parser("implement")
     implement_p.add_argument("story_id")
+    implement_p.add_argument("--epic", help="disambiguate story id by parent epic/session id")
     implement_p.set_defaults(func=cmd_implement)
 
     migrate_p = sub.add_parser("migrate-sqlite")
