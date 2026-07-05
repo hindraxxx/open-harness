@@ -2594,6 +2594,7 @@ class HarnessCliTest(unittest.TestCase):
             self.assertEqual(len(stored), 2)
             self.assertIn(open_annotation["id"], page)
             self.assertIn("open-only quote", page)
+            self.assertIn("mark.hx-mark { background: #d8f5d0; color: #14532d;", page)
             self.assertNotIn(addressed_annotation["id"], page)
             self.assertNotIn("addressed-only quote", page)
 

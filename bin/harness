@@ -22,7 +22,7 @@ from pathlib import Path
 
 
 MAX_RECOVERY_ATTEMPTS = 3
-HARNESS_VERSION = "2026.07.03.12"
+HARNESS_VERSION = "2026.07.05.1"
 AUTO_SERVE_DISABLED_VALUES = {"0", "false", "no", "off", ""}
 
 LANGUAGE_SKILLS = [
@@ -4062,7 +4062,7 @@ body { padding-top: 48px !important; }
 .hx-card blockquote { margin: 6px 0; padding-left: 8px; border-left: 3px solid #6f725b; color: #4f533f; font-size: 12px; }
 .hx-card .hx-note { margin: 6px 0 0; }
 .hx-card .hx-del { border: 0; background: none; color: #a3524a; cursor: pointer; font-size: 12px; padding: 0; margin-top: 6px; }
-mark.hx-mark { background: #fff2b3; padding: 0 1px; border-radius: 2px; }
+mark.hx-mark { background: #d8f5d0; color: #14532d; padding: 0 1px; border-radius: 2px; }
 body.hx-has-panel main { width: min(1100px, calc(100% - 380px)); margin-left: 24px; }
 .hx-done-overlay {
   position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center;
