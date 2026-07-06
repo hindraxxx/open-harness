@@ -1016,6 +1016,27 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("- [ ] Validate download flow", approved_text)
             self.assertIn("- [ ] Implement download flow", approved_text)
 
+    def test_approve_planning_stops_background_annotation_server(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            self.run_cli(cwd, "init")
+            self.run_cli(cwd, "start", "req-login-timeout")
+            artifact = cwd / ".harness" / "sessions" / "req-login-timeout" / "artifact.md"
+            session_id = artifact.resolve().parent.name
+            text = artifact.read_text()
+            text = text.replace("TBD", "Download Neraca as Excel", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Acceptance exists", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Validation exists", 1)
+            text = text.replace("- [ ] TBD", "- [ ] Implementation task", 1)
+            artifact.write_text(self.with_guidance(text))
+            self.run_cli(cwd, "transition", "req-login-timeout", "planning")
+
+            with mock.patch.object(self.harness_module, "stop_background_serve") as stop_background_serve:
+                result = self.run_cli(cwd, "approve-planning", "req-login-timeout", "--by", "Liem")
+
+            self.assertIn("planning approved by Liem", result.stdout)
+            stop_background_serve.assert_called_once_with(session_id)
+
     def test_planning_to_implementation_does_not_require_checked_implementation_items(self):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)
@@ -2232,11 +2253,13 @@ class HarnessCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)
             artifact = self.enter_quality_check(cwd)
+            session_id = artifact.resolve().parent.name
             self.complete_quality_check(cwd, artifact)
             self.run_cli(cwd, "transition", "req-login-timeout", "approval")
 
-            result = self.run_cli(cwd, "approve-quality", "req-login-timeout", "--by", "Liem")
-            done = self.run_cli(cwd, "transition", "req-login-timeout", "done")
+            with mock.patch.object(self.harness_module, "stop_background_serve") as stop_background_serve:
+                result = self.run_cli(cwd, "approve-quality", "req-login-timeout", "--by", "Liem")
+                done = self.run_cli(cwd, "transition", "req-login-timeout", "done")
 
             self.assertIn("quality approved by Liem", result.stdout)
             text = artifact.read_text()
@@ -2244,6 +2267,10 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn('quality_approved_by: "Liem"', text)
             self.assertIn("## Final Approval\n\nApproved by Liem", text)
             self.assertIn("transitioned: approval -> done", done.stdout)
+            self.assertEqual(
+                [mock.call(session_id), mock.call(session_id)],
+                stop_background_serve.call_args_list,
+            )
 
     def test_quality_recovery_clears_quality_approval(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2598,6 +2625,22 @@ class HarnessCliTest(unittest.TestCase):
             self.assertNotIn(addressed_annotation["id"], page)
             self.assertNotIn("addressed-only quote", page)
 
+    def test_annotation_page_keeps_artifact_proportional_with_comments_panel(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            session_id = self.start_session(cwd)
+            old_cwd = Path.cwd()
+            try:
+                os.chdir(cwd)
+                page = self.harness_module.build_annotation_page(session_id)
+            finally:
+                os.chdir(old_cwd)
+
+            self.assertIn("--hx-panel-width: clamp(300px, 17vw, 360px);", page)
+            self.assertIn("body.hx-has-panel { padding-right: var(--hx-panel-width); }", page)
+            self.assertIn("width: min(1920px, calc(100% - var(--hx-page-gap) - var(--hx-page-gap)));", page)
+            self.assertNotIn("width: min(1100px, calc(100% - 380px)); margin-left: 24px;", page)
+
     def test_add_annotation_requires_quote_and_comment(self):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)
@@ -2948,6 +2991,45 @@ class HarnessCliTest(unittest.TestCase):
                 # Complete button -> shutdown
                 urllib.request.urlopen(urllib.request.Request(base + "/shutdown", data=b"{}", method="POST"))
                 os.waitpid(state["pid"], 0)
+                self.assertFalse((cwd / ".harness" / "sessions" / session_id / ".serve.json").exists())
+                state = None
+            finally:
+                if state and state.get("pid"):
+                    try:
+                        os.kill(state["pid"], 9)
+                        os.waitpid(state["pid"], 0)
+                    except OSError:
+                        pass
+                os.chdir(old_cwd)
+
+    def test_stop_background_serve_round_trip(self):
+        if not hasattr(os, "fork"):
+            self.skipTest("os.fork unavailable")
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            session_id = self.start_session(cwd)
+            old_cwd = Path.cwd()
+            import urllib.request
+            import time
+
+            state = None
+            try:
+                os.chdir(cwd)
+                state = self.harness_module.start_background_serve(session_id)
+                self.assertIsNotNone(state)
+                base = state["url"].rstrip("/")
+                deadline = time.time() + 5
+                page = None
+                while time.time() < deadline:
+                    try:
+                        page = urllib.request.urlopen(base + "/").read().decode()
+                        break
+                    except Exception:
+                        time.sleep(0.05)
+                self.assertIsNotNone(page)
+
+                self.assertTrue(self.harness_module.stop_background_serve(session_id))
+                self.assertIsNone(self.harness_module.running_serve(session_id))
                 self.assertFalse((cwd / ".harness" / "sessions" / session_id / ".serve.json").exists())
                 state = None
             finally:

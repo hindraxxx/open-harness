@@ -8,11 +8,13 @@ import html
 import json
 import os
 import re
+import signal
 import shutil
 import sqlite3
 import subprocess
 import sys
 import threading
+import time
 import urllib.request
 import urllib.parse
 import uuid
@@ -22,7 +24,7 @@ from pathlib import Path
 
 
 MAX_RECOVERY_ATTEMPTS = 3
-HARNESS_VERSION = "2026.07.05.1"
+HARNESS_VERSION = "2026.07.06.2"
 AUTO_SERVE_DISABLED_VALUES = {"0", "false", "no", "off", ""}
 
 LANGUAGE_SKILLS = [
@@ -3818,6 +3820,7 @@ def cmd_approve_planning(args: argparse.Namespace) -> None:
         },
     )
     insert_approval(args.session_id, "planning", approver, planning_snapshot(read_text(path)))
+    stop_background_serve(args.session_id)
     print(f"planning approved by {approver}")
 
 
@@ -3849,6 +3852,7 @@ def cmd_approve_review(args: argparse.Namespace) -> None:
         },
     )
     insert_approval(args.session_id, "review", approver, "")
+    stop_background_serve(args.session_id)
     print(f"review approved by {approver}")
 
 
@@ -3878,6 +3882,7 @@ def cmd_approve_quality(args: argparse.Namespace) -> None:
         },
     )
     insert_approval(args.session_id, "quality", approver, quality_snapshot(read_text(path)))
+    stop_background_serve(args.session_id)
     print(f"quality approved by {approver}")
 
 
@@ -3944,6 +3949,8 @@ def cmd_transition(args: argparse.Namespace) -> None:
     if state == "blocked" or args.state == "done":
         set_recovery_attempts(args.session_id, 0)
     record_transition(args.session_id, state, args.state, "success")
+    if args.state == "done":
+        stop_background_serve(args.session_id)
     print(f"transitioned: {state} -> {args.state}")
 
 
@@ -4020,6 +4027,10 @@ def cmd_attach_proof(args: argparse.Namespace) -> None:
 
 
 ANNOTATION_CLIENT_CSS = """
+:root {
+  --hx-panel-width: clamp(300px, 17vw, 360px);
+  --hx-page-gap: clamp(18px, 2vw, 34px);
+}
 .hx-toolbar {
   position: fixed; top: 0; left: 0; right: 0; z-index: 40;
   display: flex; align-items: center; gap: 12px;
@@ -4052,7 +4063,7 @@ body { padding-top: 48px !important; }
 .hx-popover .hx-quote { font-size: 12px; color: #756f66; margin-bottom: 6px; }
 .hx-popover .hx-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
 .hx-panel {
-  position: fixed; top: 48px; right: 0; bottom: 0; width: 320px; z-index: 35;
+  position: fixed; top: 48px; right: 0; bottom: 0; width: var(--hx-panel-width); z-index: 35;
   overflow-y: auto; padding: 14px; background: rgba(255,253,248,0.98);
   border-left: 1px solid #ddd7ce; font: 13px/1.5 "Geist", sans-serif;
 }
@@ -4063,7 +4074,20 @@ body { padding-top: 48px !important; }
 .hx-card .hx-note { margin: 6px 0 0; }
 .hx-card .hx-del { border: 0; background: none; color: #a3524a; cursor: pointer; font-size: 12px; padding: 0; margin-top: 6px; }
 mark.hx-mark { background: #d8f5d0; color: #14532d; padding: 0 1px; border-radius: 2px; }
-body.hx-has-panel main { width: min(1100px, calc(100% - 380px)); margin-left: 24px; }
+body.hx-has-panel { padding-right: var(--hx-panel-width); }
+body.hx-has-panel main {
+  width: min(1920px, calc(100% - var(--hx-page-gap) - var(--hx-page-gap)));
+  margin-left: auto;
+  margin-right: auto;
+}
+@media (max-width: 760px) {
+  body.hx-has-panel { padding-right: 0; padding-bottom: 42vh; }
+  body.hx-has-panel main { width: min(100% - 28px, 720px); }
+  .hx-panel {
+    top: auto; left: 0; width: 100%; height: 38vh;
+    border-left: 0; border-top: 1px solid #ddd7ce;
+  }
+}
 .hx-done-overlay {
   position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center;
   background: rgba(35,33,29,0.72); color: #fffdf8; font: 600 18px sans-serif; text-align: center; padding: 24px;
@@ -4117,7 +4141,7 @@ ANNOTATION_CLIENT_JS = """
       clearFloating();
       commentBtn = document.createElement("button");
       commentBtn.className = "hx-comment-btn";
-      commentBtn.textContent = "💬 Comment";
+      commentBtn.textContent = "Comment";
       commentBtn.style.left = (window.scrollX + rect.left + rect.width / 2) + "px";
       commentBtn.style.top = (window.scrollY + rect.bottom) + "px";
       commentBtn.addEventListener("click", function () {
@@ -4229,7 +4253,7 @@ ANNOTATION_CLIENT_JS = """
   function buildToolbar() {
     var bar = document.createElement("div");
     bar.className = "hx-toolbar";
-    bar.innerHTML = "<span>📝 Annotate plan</span><span class='hx-spacer'></span>";
+    bar.innerHTML = "<span>Annotate plan</span><span class='hx-spacer'></span>";
     var complete = document.createElement("button");
     complete.className = "hx-complete";
     complete.textContent = "Complete";
@@ -4367,6 +4391,59 @@ def running_serve(session_id: str) -> dict | None:
     except OSError:
         return None
     return data
+
+
+def stop_background_serve(session_id: str) -> bool:
+    """Stop the recorded annotation server for this session, if one is running."""
+    state = running_serve(session_id)
+    if not state:
+        serve_state_path(session_id).unlink(missing_ok=True)
+        return False
+    raw_pid = state.get("pid")
+    if not raw_pid:
+        serve_state_path(session_id).unlink(missing_ok=True)
+        return False
+    try:
+        pid = int(raw_pid)
+    except (TypeError, ValueError):
+        serve_state_path(session_id).unlink(missing_ok=True)
+        return False
+    url = str(state.get("url", "")).rstrip("/")
+    if url:
+        try:
+            request = urllib.request.Request(url + "/shutdown", data=b"{}", method="POST")
+            urllib.request.urlopen(request, timeout=0.5).close()
+        except Exception:
+            pass
+    for _ in range(10):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            break
+        except OSError:
+            break
+        time.sleep(0.05)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        serve_state_path(session_id).unlink(missing_ok=True)
+        return True
+    except OSError:
+        serve_state_path(session_id).unlink(missing_ok=True)
+        return False
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    except OSError:
+        return False
+    finally:
+        serve_state_path(session_id).unlink(missing_ok=True)
+    try:
+        os.waitpid(pid, os.WNOHANG)
+    except (ChildProcessError, OSError):
+        pass
+    return True
 
 
 def start_background_serve(session_id: str) -> dict | None:
