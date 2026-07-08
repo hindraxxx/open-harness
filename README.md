@@ -2,6 +2,12 @@
 
 Local CLI harness for agent-driven engineering workflows. It creates `.harness/` files in a repo, tracks session state in local SQLite, and gives agents guardrails for planning, implementation, review, and quality checks.
 
+## Why Not Just an AGENTS.md?
+
+A plain `AGENTS.md` is prose the agent *hopes* to follow. This harness turns the same rules into a CLI-enforced state machine: code edits are gated to the right phase, transitions are blocked until validation passes, approvals and proofs are recorded, and any session resumes from `harness status`. Same agent, same repo — but the workflow actually holds.
+
+![Workflow Harness vs. a plain AGENTS.md](docs/why-harness.svg)
+
 ## Install
 
 Host `install.sh` from this GitHub repo and share one bootstrap command across the team:
