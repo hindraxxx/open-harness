@@ -6,7 +6,7 @@ Local CLI harness for agent-driven engineering workflows. It creates `.harness/`
 
 A plain `AGENTS.md` is prose the agent *hopes* to follow. This harness turns the same rules into a CLI-enforced state machine: code edits are gated to the right phase, transitions are blocked until validation passes, approvals and proofs are recorded, and any session resumes from `harness status`. Same agent, same repo — but the workflow actually holds.
 
-![Workflow Harness vs. a plain AGENTS.md](docs/why-harness.svg)
+![Workflow Harness vs. a plain AGENTS.md](docs/why-harness.png)
 
 ## Install
 
@@ -96,7 +96,7 @@ HTML artifacts regenerate when you run commands such as `harness status <session
 
 ## Workflow Flow
 
-![Harness workflow](docs/harness-workflow.svg)
+![Harness workflow](docs/harness-workflow.png)
 
 Compact state flow:
 
