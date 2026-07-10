@@ -3126,6 +3126,14 @@ class TestInstallUserSubagents(unittest.TestCase):
                 self.assertTrue(path.exists(), f"missing {path}")
                 self.assertIn(marker, path.read_text())
 
+            explorer_config = (codex_agents / "code-explorer.toml").read_text()
+            implementer_config = (codex_agents / "implementer.toml").read_text()
+            reviewer_config = (codex_agents / "code-reviewer.toml").read_text()
+            for config in [explorer_config, implementer_config]:
+                self.assertIn('model = "gpt-5.6-luna"', config)
+                self.assertIn('model_reasoning_effort = "high"', config)
+            self.assertIn('model_reasoning_effort = "low"', reviewer_config)
+
             self.assertIn("installed user sub-agents:", result.stdout)
 
     def test_init_does_not_overwrite_user_subagents(self):
