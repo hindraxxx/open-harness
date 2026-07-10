@@ -11,6 +11,8 @@ Ask the questions one at a time, waiting for feedback on each question before co
 
 If a *fact* can be found by exploring the codebase, look it up rather than asking me. The *decisions*, though, are mine — put each one to me and wait for my answer.
 
+Stop asking once there are no open decisions left. Walk the design tree until every branch that would change the plan is resolved, then stop — do not invent filler questions to keep going, and do not re-ask what is already settled. When the only things left are facts you can look up or decisions I have already made, tell me grilling is complete and summarize what we agreed.
+
 Do not enact the plan until I confirm we have reached a shared understanding.
 
 ## Use in the harness planning state
