@@ -4,6 +4,15 @@ Explore first. Ask blocking ambiguity questions. Write acceptance criteria, vali
 
 Use an interview loop during planning whenever exploration reveals a gap between the user's requested behavior, the proposed plan, and the current codebase. Ask short, targeted questions before filling or revising the artifact when the answer would materially change scope, requirements, behavior, success criteria, target files, data flow, or validation. Do not paper over those gaps with assumptions; record resolved answers in the relevant planning sections.
 
+## Grilling Protocol
+
+Before writing or finalizing the artifact, grill the requirement to reach a shared understanding. This is the `grilling` skill (`.agents/skills/grilling/SKILL.md`, installed by `harness init`/`harness update`); invoke it explicitly when the user says "grill" or asks to stress-test the plan, and follow its discipline by default for any non-trivial planning session.
+
+- Walk down each branch of the design tree, resolving dependencies between decisions one at a time. Ask one question, wait for the answer, then continue. Batching questions is bewildering.
+- Separate *facts* from *decisions*. A fact that the codebase can answer (target files, current behavior, data flow, validation surfaces) you look up yourself — do not ask. A *decision* (scope, success criteria, edge cases, out-of-scope boundaries) is the human's; put each one to them with your recommended answer and wait.
+- Record every resolved answer directly in the relevant `artifact.md` planning sections. Do not carry unresolved decisions into `## Implementation Guidance`.
+- Do not run `approve-planning` or transition to `implementation` until the human confirms shared understanding.
+
 ## Session Structure
 
 Decide whether this work is one session or multiple child sessions before filling the rest of the artifact. Do not decide by story count alone.

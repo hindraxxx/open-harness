@@ -1891,6 +1891,8 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("Read `.harness/project/index.md`", planning_text)
             self.assertIn("Use an interview loop during planning", planning_text)
             self.assertIn("gap between the user's requested behavior, the proposed plan, and the current codebase", planning_text)
+            self.assertIn("Grilling Protocol", planning_text)
+            self.assertIn(".agents/skills/grilling/SKILL.md", planning_text)
             self.assertIn("lower-capability implementation agent", planning_text)
             self.assertIn("Old Flow", planning_text)
             self.assertIn("New Flow", planning_text)
@@ -1969,11 +1971,14 @@ class HarnessCliTest(unittest.TestCase):
             result = self.run_cli(cwd, "update", "--skip-pull")
 
             self.assertIn("installed/refreshed local skills: code-review-expert", result.stdout)
+            self.assertIn("grilling", result.stdout)
             self.assertIn("Code Review Expert", skill_file.read_text())
             self.assertEqual(
                 skill_file.resolve(),
                 (cwd / ".codex" / "skills" / "code-review-expert" / "SKILL.md").resolve(),
             )
+            grilling_file = cwd / ".agents" / "skills" / "grilling" / "SKILL.md"
+            self.assertIn("Interview me relentlessly", grilling_file.read_text())
 
     def test_update_skip_pull_refreshes_when_target_guardrails_are_current(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2068,6 +2073,26 @@ class HarnessCliTest(unittest.TestCase):
                 self.assertTrue(mirror_path.is_symlink(), mirror_path)
                 self.assertEqual(skill_dir.resolve(), mirror_path.resolve())
             project_skill_path = cwd / "skills" / "code-review-expert"
+            self.assertTrue(project_skill_path.is_symlink())
+            self.assertEqual(skill_dir.resolve(), project_skill_path.resolve())
+
+    def test_init_installs_local_grilling_skill_and_mirrors(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+
+            result = self.run_cli(cwd, "init")
+
+            skill_dir = cwd / ".agents" / "skills" / "grilling"
+            self.assertIn("grilling", result.stdout)
+            skill_text = (skill_dir / "SKILL.md").read_text()
+            self.assertIn("name: grilling", skill_text)
+            self.assertIn("Interview me relentlessly", skill_text)
+            self.assertIn("mattpocock/skills", skill_text)
+            for mirror in (".codex", ".claude", ".opencode"):
+                mirror_path = cwd / mirror / "skills" / "grilling"
+                self.assertTrue(mirror_path.is_symlink(), mirror_path)
+                self.assertEqual(skill_dir.resolve(), mirror_path.resolve())
+            project_skill_path = cwd / "skills" / "grilling"
             self.assertTrue(project_skill_path.is_symlink())
             self.assertEqual(skill_dir.resolve(), project_skill_path.resolve())
 
