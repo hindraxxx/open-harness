@@ -1893,6 +1893,7 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("gap between the user's requested behavior, the proposed plan, and the current codebase", planning_text)
             self.assertIn("Grilling Protocol", planning_text)
             self.assertIn(".agents/skills/grilling/SKILL.md", planning_text)
+            self.assertIn("Stop asking once no open decisions remain", planning_text)
             self.assertIn("lower-capability implementation agent", planning_text)
             self.assertIn("Old Flow", planning_text)
             self.assertIn("New Flow", planning_text)
@@ -3118,9 +3119,9 @@ class TestInstallUserSubagents(unittest.TestCase):
                 self.assertIn(marker, path.read_text())
 
             for name, marker in [
-                ("code-explorer.toml", 'name = "code-explorer"'),
-                ("implementer.toml", 'name = "implementer"'),
-                ("code-reviewer.toml", 'name = "code-reviewer"'),
+                ("code-explorer.toml", 'model = "gpt-5.6-luna"\nmodel_reasoning_effort = "high"'),
+                ("implementer.toml", 'model = "gpt-5.6-luna"\nmodel_reasoning_effort = "high"'),
+                ("code-reviewer.toml", 'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "medium"'),
             ]:
                 path = codex_agents / name
                 self.assertTrue(path.exists(), f"missing {path}")
@@ -3134,26 +3135,29 @@ class TestInstallUserSubagents(unittest.TestCase):
                 self.assertIn('model_reasoning_effort = "high"', config)
             self.assertIn('model_reasoning_effort = "low"', reviewer_config)
 
-            self.assertIn("installed user sub-agents:", result.stdout)
+            self.assertIn("installed/refreshed user sub-agents:", result.stdout)
 
-    def test_init_does_not_overwrite_user_subagents(self):
-        """init preserves existing sub-agent files and creates the missing ones."""
+    def test_init_refreshes_existing_user_subagents(self):
+        """init refreshes existing harness-managed files and preserves unrelated agents."""
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
             fake_home = tmp / "home"
             fake_home.mkdir()
             claude_agents = fake_home / ".claude" / "agents"
             claude_agents.mkdir(parents=True)
-            sentinel_content = "SENTINEL_DO_NOT_OVERWRITE"
+            sentinel_content = "STALE_HARNESS_MANAGED_AGENT"
             (claude_agents / "implementer.md").write_text(sentinel_content)
+            custom_agent = claude_agents / "my-custom-agent.md"
+            custom_agent.write_text("CUSTOM_AGENT")
 
             project = tmp / "project"
             project.mkdir()
             result = self._run_harness(project, ["init"], fake_home)
             self.assertEqual(result.returncode, 0, f"init failed: {result.stderr}")
 
-            # Sentinel preserved
-            self.assertEqual((claude_agents / "implementer.md").read_text(), sentinel_content)
+            self.assertNotEqual((claude_agents / "implementer.md").read_text(), sentinel_content)
+            self.assertIn("name: implementer", (claude_agents / "implementer.md").read_text())
+            self.assertEqual(custom_agent.read_text(), "CUSTOM_AGENT")
 
             # Other five files created
             codex_agents = fake_home / ".codex" / "agents"
@@ -3162,8 +3166,8 @@ class TestInstallUserSubagents(unittest.TestCase):
             for name in ["code-explorer.toml", "implementer.toml", "code-reviewer.toml"]:
                 self.assertTrue((codex_agents / name).exists(), f"missing codex/{name}")
 
-    def test_update_installs_missing_user_subagents(self):
-        """harness update --skip-pull creates missing sub-agents in a fresh HOME."""
+    def test_update_refreshes_user_subagents(self):
+        """harness update --skip-pull refreshes stale managed files and creates missing ones."""
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
             fake_home = tmp / "home"
@@ -3176,13 +3180,14 @@ class TestInstallUserSubagents(unittest.TestCase):
                 extra_env={"HARNESS_SKIP_USER_SUBAGENTS": "1"},
             )
             self.assertEqual(init_result.returncode, 0, f"init failed: {init_result.stderr}")
-            # Remove any subagents that might have leaked (shouldn't with skip gate)
-            import shutil as _shutil
             claude_agents = fake_home / ".claude" / "agents"
             codex_agents = fake_home / ".codex" / "agents"
-            for d in [claude_agents, codex_agents]:
-                if d.exists():
-                    _shutil.rmtree(d)
+            claude_agents.mkdir(parents=True)
+            codex_agents.mkdir(parents=True)
+            (claude_agents / "code-reviewer.md").write_text("STALE_CLAUDE_AGENT")
+            (codex_agents / "implementer.toml").write_text("STALE_CODEX_AGENT")
+            custom_agent = codex_agents / "my-custom-agent.toml"
+            custom_agent.write_text("CUSTOM_AGENT")
 
             update_result = self._run_harness(project, ["update", "--skip-pull"], fake_home)
             self.assertEqual(update_result.returncode, 0, f"update failed: {update_result.stderr}")
@@ -3191,6 +3196,31 @@ class TestInstallUserSubagents(unittest.TestCase):
                 self.assertTrue((claude_agents / name).exists(), f"missing claude/{name}")
             for name in ["code-explorer.toml", "implementer.toml", "code-reviewer.toml"]:
                 self.assertTrue((codex_agents / name).exists(), f"missing codex/{name}")
+            self.assertIn("name: code-reviewer", (claude_agents / "code-reviewer.md").read_text())
+            self.assertIn('model = "gpt-5.6-terra"', (codex_agents / "implementer.toml").read_text())
+            self.assertEqual(custom_agent.read_text(), "CUSTOM_AGENT")
+            self.assertIn("installed/refreshed user sub-agents:", update_result.stdout)
+
+    def test_init_replaces_managed_symlink_without_overwriting_target(self):
+        """Refresh replaces a managed symlink entry instead of following its target."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            fake_home = tmp / "home"
+            codex_agents = fake_home / ".codex" / "agents"
+            codex_agents.mkdir(parents=True)
+            external_target = tmp / "external-agent.toml"
+            external_target.write_text("DO_NOT_OVERWRITE")
+            managed_agent = codex_agents / "code-explorer.toml"
+            managed_agent.symlink_to(external_target)
+
+            project = tmp / "project"
+            project.mkdir()
+            result = self._run_harness(project, ["init"], fake_home)
+            self.assertEqual(result.returncode, 0, f"init failed: {result.stderr}")
+
+            self.assertEqual(external_target.read_text(), "DO_NOT_OVERWRITE")
+            self.assertFalse(managed_agent.is_symlink())
+            self.assertIn('model = "gpt-5.6-terra"', managed_agent.read_text())
 
     def test_skip_user_subagents_env_gate(self):
         """HARNESS_SKIP_USER_SUBAGENTS=1 prevents any sub-agent files from being created."""

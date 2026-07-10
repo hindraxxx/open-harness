@@ -9,8 +9,9 @@ Use an interview loop during planning whenever exploration reveals a gap between
 Before writing or finalizing the artifact, grill the requirement to reach a shared understanding. This is the `grilling` skill (`.agents/skills/grilling/SKILL.md`, installed by `harness init`/`harness update`); invoke it explicitly when the user says "grill" or asks to stress-test the plan, and follow its discipline by default for any non-trivial planning session.
 
 - Walk down each branch of the design tree, resolving dependencies between decisions one at a time. Ask one question, wait for the answer, then continue. Batching questions is bewildering.
-- Separate *facts* from *decisions*. A fact that the codebase can answer (target files, current behavior, data flow, validation surfaces) you look up yourself — do not ask. A *decision* (scope, success criteria, edge cases, out-of-scope boundaries) is the human's; put each one to them with your recommended answer and wait.
+- Separate *facts* from *decisions*. A fact that the codebase can answer (target files, current behavior, data flow, validation surfaces) you look up yourself — do not ask. A *decision* (scope, success criteria, edge cases, failure/error handling for null/absent/empty/boundary inputs, out-of-scope boundaries) is the human's; put each one to them with your recommended answer and wait.
 - Record every resolved answer directly in the relevant `artifact.md` planning sections. Do not carry unresolved decisions into `## Implementation Guidance`.
+- Stop asking once no open decisions remain. Grill until the design tree has no unresolved branch that would change scope, behavior, success criteria, target files, data flow, failure handling, or validation — then stop. Do not manufacture questions to prolong the interview, do not re-ask what is already settled, and do not ask about anything the codebase already answers. When the only remaining items are facts you can look up or decisions the human has already made, state that grilling is complete and summarize the resolved understanding.
 - Do not run `approve-planning` or transition to `implementation` until the human confirms shared understanding.
 
 ## Session Structure
@@ -100,6 +101,7 @@ Planning must include real checklist items in:
 - a mandatory `### Code Anchors` subsection naming the exact existing variables, conditions, helper functions, or call sites the implementation must use for key decisions
 - invariants and out-of-scope areas that must not be changed
 - concrete data cases or examples the implementer should verify
+- a mandatory `### Edge Cases & Failure Modes` subsection enumerating the null/absent, empty, and error conditions the implementation must handle defensively so it does not introduce null-dereference (NPE), missing-key, index-out-of-range, or unhandled-error regressions. Cover at least: null/None/undefined or absent values, empty collections and empty strings, missing map/dict keys and unset config, unresolved lookups and not-found rows, boundary values (zero, negative, max, first/last), and error/exception/timeout paths on external and I/O calls. For each case name the exact variable, field, or call site (reuse the `### Code Anchors`) and state the required safe behavior — guard, default, early return, or surfaced error — never a silent swallow. If a case is provably impossible in this codebase, say why rather than omitting it. Reflect these cases in `## Validation Plan` (negative/failure checks, not only the happy path) and in `## Acceptance Criteria` where they are externally observable.
 
 Do not put pseudocode or sample code in a separate top-level section. Keep it inside `### Implementation Sketch` so implementers find the intended code shape in one place.
 
