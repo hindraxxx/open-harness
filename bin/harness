@@ -24,7 +24,7 @@ from pathlib import Path
 
 
 MAX_RECOVERY_ATTEMPTS = 3
-HARNESS_VERSION = "2026.07.10.2"
+HARNESS_VERSION = "2026.07.10.3"
 AUTO_SERVE_DISABLED_VALUES = {"0", "false", "no", "off", ""}
 
 LANGUAGE_SKILLS = [
@@ -2753,13 +2753,24 @@ def install_user_subagents() -> list[str]:
     }
     for d in target_dirs.values():
         d.mkdir(parents=True, exist_ok=True)
-    created = []
+    refreshed = []
     for cli, fname in _USER_SUBAGENT_FILES:
         src = bundle_root / cli / fname
         dst = target_dirs[cli] / fname
-        if write_new(dst, src.read_text()):
-            created.append(f"{cli}/{fname}")
-    return created
+        content = src.read_text()
+        if not dst.is_symlink() and dst.exists():
+            if not dst.is_file():
+                die(f"managed sub-agent path is not a file: {dst}")
+            if dst.read_text() == content:
+                continue
+        temp_path = dst.with_name(f".{dst.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            temp_path.write_text(content)
+            os.replace(temp_path, dst)
+        finally:
+            temp_path.unlink(missing_ok=True)
+        refreshed.append(f"{cli}/{fname}")
+    return refreshed
 
 
 def cmd_init(_args: argparse.Namespace) -> None:
@@ -2790,7 +2801,7 @@ def cmd_init(_args: argparse.Namespace) -> None:
         print(f"installed language skills: {', '.join(installed)}")
     installed_subagents = install_user_subagents()
     if installed_subagents:
-        print(f"installed user sub-agents: {', '.join(installed_subagents)}")
+        print(f"installed/refreshed user sub-agents: {', '.join(installed_subagents)}")
 
 
 def print_project_map_result(message: str, written: list[Path]) -> None:
@@ -2833,14 +2844,14 @@ def sync_target_guardrails(force: bool = False) -> None:
             print(f"installed/refreshed language skills: {', '.join(installed)}")
         installed_subagents = install_user_subagents()
         if installed_subagents:
-            print(f"installed user sub-agents: {', '.join(installed_subagents)}")
+            print(f"installed/refreshed user sub-agents: {', '.join(installed_subagents)}")
     else:
         ensure_claude_symlink()
         print("target guardrails current")
         print_harness_version_change(previous_version)
         installed_subagents = install_user_subagents()
         if installed_subagents:
-            print(f"installed user sub-agents: {', '.join(installed_subagents)}")
+            print(f"installed/refreshed user sub-agents: {', '.join(installed_subagents)}")
 
 
 def cmd_sync_guardrails(args: argparse.Namespace) -> None:
