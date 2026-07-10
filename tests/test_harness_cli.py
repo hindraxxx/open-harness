@@ -1893,6 +1893,7 @@ class HarnessCliTest(unittest.TestCase):
             self.assertIn("gap between the user's requested behavior, the proposed plan, and the current codebase", planning_text)
             self.assertIn("Grilling Protocol", planning_text)
             self.assertIn(".agents/skills/grilling/SKILL.md", planning_text)
+            self.assertIn("Stop asking once no open decisions remain", planning_text)
             self.assertIn("lower-capability implementation agent", planning_text)
             self.assertIn("Old Flow", planning_text)
             self.assertIn("New Flow", planning_text)

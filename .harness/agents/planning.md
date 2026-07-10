@@ -11,6 +11,7 @@ Before writing or finalizing the artifact, grill the requirement to reach a shar
 - Walk down each branch of the design tree, resolving dependencies between decisions one at a time. Ask one question, wait for the answer, then continue. Batching questions is bewildering.
 - Separate *facts* from *decisions*. A fact that the codebase can answer (target files, current behavior, data flow, validation surfaces) you look up yourself — do not ask. A *decision* (scope, success criteria, edge cases, failure/error handling for null/absent/empty/boundary inputs, out-of-scope boundaries) is the human's; put each one to them with your recommended answer and wait.
 - Record every resolved answer directly in the relevant `artifact.md` planning sections. Do not carry unresolved decisions into `## Implementation Guidance`.
+- Stop asking once no open decisions remain. Grill until the design tree has no unresolved branch that would change scope, behavior, success criteria, target files, data flow, failure handling, or validation — then stop. Do not manufacture questions to prolong the interview, do not re-ask what is already settled, and do not ask about anything the codebase already answers. When the only remaining items are facts you can look up or decisions the human has already made, state that grilling is complete and summarize the resolved understanding.
 - Do not run `approve-planning` or transition to `implementation` until the human confirms shared understanding.
 
 ## Session Structure
