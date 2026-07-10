@@ -3121,7 +3121,7 @@ class TestInstallUserSubagents(unittest.TestCase):
             for name, marker in [
                 ("code-explorer.toml", 'model = "gpt-5.6-luna"\nmodel_reasoning_effort = "high"'),
                 ("implementer.toml", 'model = "gpt-5.6-luna"\nmodel_reasoning_effort = "high"'),
-                ("code-reviewer.toml", 'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "medium"'),
+                ("code-reviewer.toml", 'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "low"'),
             ]:
                 path = codex_agents / name
                 self.assertTrue(path.exists(), f"missing {path}")
@@ -3197,7 +3197,7 @@ class TestInstallUserSubagents(unittest.TestCase):
             for name in ["code-explorer.toml", "implementer.toml", "code-reviewer.toml"]:
                 self.assertTrue((codex_agents / name).exists(), f"missing codex/{name}")
             self.assertIn("name: code-reviewer", (claude_agents / "code-reviewer.md").read_text())
-            self.assertIn('model = "gpt-5.6-terra"', (codex_agents / "implementer.toml").read_text())
+            self.assertIn('model = "gpt-5.6-luna"', (codex_agents / "implementer.toml").read_text())
             self.assertEqual(custom_agent.read_text(), "CUSTOM_AGENT")
             self.assertIn("installed/refreshed user sub-agents:", update_result.stdout)
 
@@ -3220,7 +3220,7 @@ class TestInstallUserSubagents(unittest.TestCase):
 
             self.assertEqual(external_target.read_text(), "DO_NOT_OVERWRITE")
             self.assertFalse(managed_agent.is_symlink())
-            self.assertIn('model = "gpt-5.6-terra"', managed_agent.read_text())
+            self.assertIn('model = "gpt-5.6-luna"', managed_agent.read_text())
 
     def test_skip_user_subagents_env_gate(self):
         """HARNESS_SKIP_USER_SUBAGENTS=1 prevents any sub-agent files from being created."""

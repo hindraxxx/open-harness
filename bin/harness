@@ -24,7 +24,7 @@ from pathlib import Path
 
 
 MAX_RECOVERY_ATTEMPTS = 3
-HARNESS_VERSION = "2026.07.11.1"
+HARNESS_VERSION = "2026.07.11.2"
 AUTO_SERVE_DISABLED_VALUES = {"0", "false", "no", "off", ""}
 
 LANGUAGE_SKILLS = [
